@@ -27,7 +27,8 @@ export default function BarcodePOS() {
     return p?.user_id || p?.sub || p?.username || 'guest';
   };
 
-  const sanitizeBarcode = (code) => String(code || '').replace(/[^0-9]/g, '').trim();
+  const sanitizeBarcode = (code) => String(code || '').trim();
+
 
   const todayKey = useMemo(() => {
     const d = new Date();
@@ -222,9 +223,9 @@ export default function BarcodePOS() {
   const [manualLoading, setManualLoading] = useState(false);
 
   const validateBarcode = useCallback((code) => {
-    const clean = sanitizeBarcode(code);
+    const clean = code.trim();
     if (!clean) return '❌ الباركود فارغ';
-    if (clean.length < 8 || clean.length > 14) return '❌ طول الباركود يجب أن يكون بين 8 و 14 رقم';
+    if (clean.length < 3 || clean.length > 50) return '❌ طول الباركود غير صالح';
     return null;
   }, []);
 
@@ -330,7 +331,7 @@ const addToCart = useCallback(
       p !== null &&
       p !== undefined &&
       typeof p.id === 'string' &&
-      p.id.trim().length > 10 &&
+      p.id.trim().length > 0 &&
       typeof p.name === 'string' &&
       p.name.trim().length > 0 &&
       !isNaN(Number(p.price));
