@@ -108,12 +108,9 @@ export default function BarcodePOS() {
 
   const createNewTab = useCallback(() => {
     setTabs((prev) => {
-      const nextId = Math.max(...prev.map((t) => t.id), 0) + 1;
-      return [...prev, { id: nextId, name: `عملية ${nextId}`, cart: [] }];
-    });
-    setActiveTabId((prevId) => {
-      const max = Math.max(...tabs.map((t) => t.id));
-      return max + 1;
+  const nextId = Math.max(...prev.map((t) => t.id), 0) + 1;
+  setActiveTabId(nextId);   // نفس nextId المحسوب من prev الحقيقي
+  return [...prev, { id: nextId, name: `عملية ${nextId}`, cart: [] }];
     });
   }, [tabs]);
 
@@ -154,7 +151,11 @@ export default function BarcodePOS() {
   }, []);
 
   const getSubtotal = useCallback(() => {
-    return cart.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0);
+    return cart.reduce((sum, i) => {
+  const price = isNaN(Number(i.price)) ? 0 : Number(i.price);
+  const qty   = isNaN(Number(i.quantity)) ? 1 : Number(i.quantity);
+  return sum + price * qty;
+}, 0);
   }, [cart]);
 
   const getTotal = useCallback(() => {
@@ -281,9 +282,9 @@ export default function BarcodePOS() {
             id: product.id,
             name: product.name,
             barcode: scannedBarcode || product.barcode,
-            price: Number(product.price),
-            quantity: 1,
-            stock: stock,
+            price: isNaN(Number(product.price)) ? 0 : Number(product.price),
+			quantity: 1,
+			stock: (stock === null || stock === undefined || isNaN(Number(stock))) ? null : Number(stock),
           },
         ];
       });

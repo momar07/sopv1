@@ -93,7 +93,19 @@ class Sale(models.Model):
         auto_now=True,
         verbose_name="تاريخ التحديث"
     )
-
+    invoice_number = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        verbose_name="رقم الفاتورة"
+    )
+    paid_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        blank=True,
+        null=True,
+        verbose_name="المبلغ المدفوع"
+    )
     class Meta:
         verbose_name        = "عملية بيع"
         verbose_name_plural = "عمليات البيع"
