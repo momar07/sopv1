@@ -125,6 +125,19 @@ export default function BarcodePOS() {
       return newTabs;
     });
   }, [activeTabId]);
+  
+    // ✅ إغلاق أو reset التاب بعد نجاح البيع
+  const closeOrResetAfterSale = useCallback((tabIdToClose) => {
+    setTabs((prev) => {
+      if (prev.length <= 1) {
+        return [{ ...prev[0], cart: [] }];
+      }
+      const remaining = prev.filter((t) => t.id !== tabIdToClose);
+      setActiveTabId(remaining[remaining.length - 1].id);
+      return remaining;
+    });
+  }, []);
+
 
   // ---------- Cart helpers ----------
   const [discount, setDiscount] = useState(0);
@@ -603,6 +616,9 @@ export default function BarcodePOS() {
   const finalizeSale = useCallback(async () => {
     if (!validateSale()) return;
 
+    // ✅ هنا — قبل أي حاجة
+    const closedTabId = activeTabId;
+
     const subtotal = getSubtotal();
     const discountAmount = (subtotal * Number(discount || 0)) / 100;
     const taxAmount = ((subtotal - discountAmount) * Number(tax || 0)) / 100;
@@ -631,38 +647,44 @@ export default function BarcodePOS() {
     try {
       await salesAPI.create(saleData);
       pushToast('success', '✅ تم تسجيل العملية بنجاح', { duration: 3000 });
-      
-      // Print receipt
+
       setTimeout(() => printReceipt(saleData), 500);
 
-      // Clear active
-      setCartForActiveTab([]);
       setDiscount(0);
       setTax(0);
       setPaymentMethod('cash');
       setPaidAmount('');
       setNote('');
-      if (lockScanner) setTimeout(() => barcodeRef.current?.focus?.(), 80);
 
-      // Clear persisted state
+      closeOrResetAfterSale(closedTabId);
+
       try {
         const st = JSON.parse(localStorage.getItem(POS_STATE_KEY) || '{}');
         if (st?.tabs) {
-          st.tabs = st.tabs.map((t) => (t.id === activeTabId ? { ...t, cart: [] } : t));
+          if (st.tabs.length > 1) {
+            st.tabs = st.tabs.filter((t) => t.id !== closedTabId);
+            st.activeTabId = st.tabs[st.tabs.length - 1]?.id;
+          } else {
+            st.tabs = st.tabs.map((t) => ({ ...t, cart: [] }));
+          }
           localStorage.setItem(POS_STATE_KEY, JSON.stringify(st));
         }
       } catch {}
+
+      if (lockScanner) setTimeout(() => barcodeRef.current?.focus?.(), 80);
+
     } catch (e) {
       console.error('Sale error:', e);
-      // offline fallback
       queueSaleOffline(saleData);
-      
       pushToast('info', '⚠️ تم حفظ العملية offline - سيتم المزامنة عند عودة الاتصال', { duration: 4000 });
-      
-      // Clear cart locally
-      setCartForActiveTab([]);
+
+      setDiscount(0);
+      setTax(0);
+      setPaymentMethod('cash');
       setPaidAmount('');
       setNote('');
+      closeOrResetAfterSale(closedTabId);
+
       if (lockScanner) setTimeout(() => barcodeRef.current?.focus?.(), 80);
     }
   }, [
@@ -677,13 +699,15 @@ export default function BarcodePOS() {
     cart,
     generateInvoiceNumber,
     queueSaleOffline,
-    setCartForActiveTab,
+    closeOrResetAfterSale,
     lockScanner,
     activeTabId,
     POS_STATE_KEY,
     pushToast,
     printReceipt,
   ]);
+
+
 
   // ---------- Manual search (products) ----------
   useEffect(() => {
