@@ -257,67 +257,128 @@ export default function BarcodePOS() {
     return true;
   }, [cart, paymentMethod, paidAmount, getTotal, pushToast, playSound]);
 
-  const addToCart = useCallback(
-    (product, scannedBarcode) => {
-      setCartForActiveTab((prev) => {
-        const exists = prev.find((i) => i.id === product.id);
-        const currentQty = exists ? Number(exists.quantity || 0) : 0;
-        const stock = typeof product.stock === 'number' ? product.stock : typeof exists?.stock === 'number' ? exists.stock : null;
+const addToCart = useCallback(
+  (product, scannedBarcode) => {
+    setCartForActiveTab((prev) => {
+      const exists = prev.find((i) => i.id === product.id);
+      const currentQty = exists ? Number(exists.quantity || 0) : 0;
 
-        if (typeof stock === 'number' && stock >= 0 && currentQty + 1 > stock) {
-          pushToast('error', `❌ المخزون غير كافٍ (${stock})`, { duration: 5000, dismissible: true });
-          playSound('error');
-          return prev;
-        }
+      // ✅ تحويل الـ stock لرقم بأمان
+      const rawStock = product.stock ?? exists?.stock ?? null;
+      const stock =
+        rawStock !== null && rawStock !== undefined && !isNaN(Number(rawStock))
+          ? Number(rawStock)
+          : null;
 
-        if (exists) {
-          return prev.map((i) =>
-            i.id === product.id ? { ...i, quantity: Math.min(99, currentQty + 1), stock: stock ?? i.stock } : i
-          );
-        }
-
-        return [
-          ...prev,
-          {
-            id: product.id,
-            name: product.name,
-            barcode: scannedBarcode || product.barcode,
-            price: isNaN(Number(product.price)) ? 0 : Number(product.price),
-			quantity: 1,
-			stock: (stock === null || stock === undefined || isNaN(Number(stock))) ? null : Number(stock),
-          },
-        ];
-      });
-
-      setLastAddedItemId(product.id);
-      setTimeout(scrollToLastItem, 50);
-
-      if (typeof product.stock === 'number' && product.stock <= 10) {
-        pushToast('warning', '⚠️ المخزون منخفض', { duration: 4000 });
-      } else {
-        pushToast('success', '✅ تمت إضافة المنتج بنجاح', { duration: 3000 });
+      // ✅ فحص المخزون قبل الإضافة
+      if (stock !== null && stock >= 0 && currentQty + 1 > stock) {
+        pushToast('error', `❌ المخزون غير كافٍ (${stock})`, {
+          duration: 5000,
+          dismissible: true,
+        });
+        playSound('error');
+        return prev;
       }
 
-      if (lockScanner) setTimeout(() => barcodeRef.current?.focus?.(), 60);
-    },
-    [setCartForActiveTab, scrollToLastItem, lockScanner, pushToast, playSound]
-  );
+      // ✅ لو المنتج موجود بالفعل في السلة، زود الكمية
+      if (exists) {
+        return prev.map((i) =>
+          i.id === product.id
+            ? { ...i, quantity: Math.min(99, currentQty + 1), stock: stock ?? i.stock }
+            : i
+        );
+      }
 
-  const fetchByBarcodeCached = useCallback(async (code) => {
-    if (memCache.current.has(code)) return memCache.current.get(code);
+      // ✅ منتج جديد، أضفه للسلة
+      return [
+        ...prev,
+        {
+          id: product.id,
+          name: product.name,
+          barcode: scannedBarcode || product.barcode,
+          price: isNaN(Number(product.price)) ? 0 : Number(product.price),
+          quantity: 1,
+          stock: stock,
+        },
+      ];
+    });
 
-    const cached = await idbGet(code);
-    if (cached) {
-      memCache.current.set(code, cached);
-      return cached;
+    setLastAddedItemId(product.id);
+    setTimeout(scrollToLastItem, 50);
+
+    // ✅ حساب الـ stock من نفس المصدر الصح
+    const rawStock = product.stock ?? null;
+    const stockNum =
+      rawStock !== null && !isNaN(Number(rawStock)) ? Number(rawStock) : null;
+
+    if (stockNum !== null && stockNum <= 10) {
+      pushToast('warning', `⚠️ المخزون منخفض (${stockNum} متبقي)`, { duration: 4000 });
+    } else {
+      pushToast('success', '✅ تمت إضافة المنتج بنجاح', { duration: 3000 });
     }
 
+    if (lockScanner) setTimeout(() => barcodeRef.current?.focus?.(), 60);
+  },
+  [setCartForActiveTab, scrollToLastItem, lockScanner, pushToast, playSound]
+);
+
+
+  const fetchByBarcodeCached = useCallback(async (code) => {
+
+    // ✅ Validator: checks that a product object is safe to use
+    const isValidProduct = (p) =>
+      p !== null &&
+      p !== undefined &&
+      typeof p.id === 'string' &&
+      p.id.trim().length > 10 &&
+      typeof p.name === 'string' &&
+      p.name.trim().length > 0 &&
+      !isNaN(Number(p.price));
+
+    // 1️⃣ Check memory cache first
+    if (memCache.current.has(code)) {
+      const memHit = memCache.current.get(code);
+      if (isValidProduct(memHit)) {
+        return memHit; // ✅ valid, use it
+      } else {
+        memCache.current.delete(code); // ❌ stale, remove it
+      }
+    }
+
+    // 2️⃣ Check IndexedDB cache
+    const idbCached = await idbGet(code);
+    if (idbCached) {
+      if (isValidProduct(idbCached)) {
+        memCache.current.set(code, idbCached); // ✅ valid, promote to memory
+        return idbCached;
+      } else {
+        // ❌ stale entry in IndexedDB, delete it
+        try {
+          if (!idb.current) idb.current = await idbOpen();
+          const tx = idb.current.transaction('products', 'readwrite');
+          tx.objectStore('products').delete(code);
+        } catch {
+          // ignore delete error
+        }
+      }
+    }
+
+    // 3️⃣ Fetch fresh from API
     const res = await productsAPI.getByBarcode(code);
     const product = res.data;
+
+    // ✅ Validate API response before caching
+    if (!isValidProduct(product)) {
+      throw new Error(`Invalid product data received from API for barcode: ${code}`);
+    }
+
+    // ✅ Store in both caches
     memCache.current.set(code, product);
     idbSet(code, product);
     return product;
+
   }, []);
+
 
   const handleScanEnter = useCallback(async () => {
     const code = sanitizeBarcode(barcode);
@@ -585,7 +646,16 @@ export default function BarcodePOS() {
     const keep = [];
     for (const it of ordered) {
       try {
-        await salesAPI.create(it.payload);
+        const fixedPayload = {
+  ...it.payload,
+  notes: it.payload.notes || it.payload.note || '',
+  paid_amount: it.payload.paid_amount !== '' && it.payload.paid_amount !== undefined
+    ? Number(it.payload.paid_amount)
+    : null,
+	};
+delete fixedPayload.note;
+delete fixedPayload.cashier_id;
+await salesAPI.create(fixedPayload);
       } catch {
         keep.push(it);
       }
@@ -627,22 +697,23 @@ export default function BarcodePOS() {
     const invoiceNumber = generateInvoiceNumber();
 
     const saleData = {
-      invoice_number: invoiceNumber,
-      subtotal: subtotal.toFixed(2),
-      discount: discountAmount.toFixed(2),
-      tax: taxAmount.toFixed(2),
-      total: total.toFixed(2),
-      payment_method: paymentMethod,
-      status: 'completed',
-      notes: note || '',
-      paid_amount: paidAmount || null,
-      items: cart.map((i) => ({
-        product_id: i.id,
-        product_name: i.name,
-        quantity: Number(i.quantity),
-        price: Number(i.price),
-      })),
-    };
+  		invoice_number: invoiceNumber,
+  		subtotal: parseFloat(subtotal.toFixed(2)),
+  		discount: parseFloat(discountAmount.toFixed(2)),
+  		tax: parseFloat(taxAmount.toFixed(2)),
+  		total: parseFloat(total.toFixed(2)),
+  		payment_method: paymentMethod,
+  		status: 'completed',
+  		notes: note || '',
+  		paid_amount: paidAmount !== '' && paidAmount !== undefined ? parseFloat(Number(paidAmount).toFixed(2)) : null,
+  		items: cart.map((i) => ({
+    		product_id: i.id,
+    		product_name: String(i.name || ''),
+    		quantity: parseInt(i.quantity, 10) || 1,
+    		price: parseFloat(Number(i.price).toFixed(2)),
+  })),
+};
+
 
 
     try {
