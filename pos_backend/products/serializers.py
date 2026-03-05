@@ -31,14 +31,23 @@ class ProductSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
+
+
+
+
+# pos_backend/products/serializers.py
+
 class ProductListSerializer(serializers.ModelSerializer):
-    """Serializer مبسط لقائمة المنتجات"""
-    category_name = serializers.CharField(source='category.name', read_only=True)
+    """Serializer قائمة المنتجات — محدّث"""
+    category_name  = serializers.CharField(source='category.name',  read_only=True)
     category_color = serializers.CharField(source='category.color', read_only=True)
-    
+    profit_margin  = serializers.ReadOnlyField()
+    is_low_stock   = serializers.ReadOnlyField()
+
     class Meta:
         model = Product
         fields = [
-            'id', 'name', 'category_name', 'category_color',
-            'price', 'stock', 'image_url', 'is_active'
+            'id', 'name', 'category', 'category_name', 'category_color',
+            'price', 'cost', 'stock', 'barcode',
+            'image_url', 'is_active', 'profit_margin', 'is_low_stock',
         ]
