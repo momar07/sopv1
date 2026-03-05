@@ -634,16 +634,16 @@ export default function BarcodePOS() {
       total: total.toFixed(2),
       payment_method: paymentMethod,
       status: 'completed',
-      note: note || '',
+      notes: note || '',
       paid_amount: paidAmount || null,
-      cashier_id: cashierId,
       items: cart.map((i) => ({
         product_id: i.id,
         product_name: i.name,
-        quantity: i.quantity,
-        price: i.price,
+        quantity: Number(i.quantity),
+        price: Number(i.price),
       })),
     };
+
 
     try {
       await salesAPI.create(saleData);
