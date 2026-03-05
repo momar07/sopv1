@@ -31,15 +31,16 @@ class SaleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sale
         fields = [
-    'id', 'invoice_number', 'customer', 'customer_name',
-    'user', 'user_name', 'user_role',
-    'subtotal', 'discount', 'tax', 'total', 'paid_amount',
-    'payment_method', 'status', 'notes',
-    'items', 'items_count', 'total_profit',
-    'has_returns', 'returns_count',
-    'created_at', 'updated_at'
-	   ]
+            'id', 'invoice_number', 'customer', 'customer_name',
+            'user', 'user_name', 'user_role',
+            'subtotal', 'discount', 'tax', 'total', 'paid_amount',
+            'payment_method', 'status', 'notes',
+            'items', 'items_count', 'total_profit',
+            'has_returns', 'returns_count',
+            'created_at', 'updated_at'
+        ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'user']
+
 
     def get_user_name(self, obj):
         if obj.user:
