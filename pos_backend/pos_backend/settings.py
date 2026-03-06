@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'customers',
     'sales',
     'ui_builder',
+    'inventory',
 ]
 
 MIDDLEWARE = [

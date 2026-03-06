@@ -26,6 +26,7 @@ urlpatterns = [
     path('api/', include('products.urls')),
     path('api/', include('customers.urls')),
     path('api/', include('sales.urls')),
+    path('api/', include('inventory.urls')),
 ]
 
 # Media files (development only)

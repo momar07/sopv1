@@ -160,4 +160,32 @@ export const cashTransactionAPI = {
   create: (data) => api.post('/cash-transactions/', data),
 };
 
+
+// ── Inventory API ──────────────────────────────────────────────────────────
+export const inventoryAPI = {
+  // Suppliers
+  getSuppliers:    (params) => api.get('/inventory/suppliers/', { params }),
+  createSupplier:  (data)   => api.post('/inventory/suppliers/', data),
+  updateSupplier:  (id, data) => api.put(`/inventory/suppliers/${id}/`, data),
+  deleteSupplier:  (id)     => api.delete(`/inventory/suppliers/${id}/`),
+
+  // Purchase Orders
+  getPurchaseOrders:      (params) => api.get('/inventory/purchase-orders/', { params }),
+  getPurchaseOrder:       (id)     => api.get(`/inventory/purchase-orders/${id}/`),
+  createPurchaseOrder:    (data)   => api.post('/inventory/purchase-orders/', data),
+  updatePurchaseOrder:    (id, data) => api.put(`/inventory/purchase-orders/${id}/`, data),
+  receivePurchaseOrder:   (id, data) => api.post(`/inventory/purchase-orders/${id}/receive/`, data),
+  cancelPurchaseOrder:    (id)     => api.post(`/inventory/purchase-orders/${id}/cancel/`),
+
+  // Stock Adjustments
+  getAdjustments:   (params) => api.get('/inventory/adjustments/', { params }),
+  createAdjustment: (data)   => api.post('/inventory/adjustments/', data),
+
+  // Alerts
+  getAlerts:             (params) => api.get('/inventory/alerts/', { params }),
+  getAlertsSummary:      (params) => api.get('/inventory/alerts/summary/', { params }),
+  checkAndGenerateAlerts:(data)   => api.post('/inventory/alerts/check_and_generate/', data),
+  resolveAlert:          (id)     => api.post(`/inventory/alerts/${id}/resolve/`),
+};
+
 export default api;
