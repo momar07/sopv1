@@ -639,34 +639,57 @@ const addToCart = useCallback(
     [loadPendingSales, savePendingSales, pushToast]
   );
 
-  const syncPendingSales = useCallback(async () => {
-    const pending = loadPendingSales();
-    if (!pending.length) return;
+const syncPendingSales = useCallback(async () => {
+  const pending = loadPendingSales();
+  if (!pending.length) return;
 
-    const ordered = [...pending].reverse();
-    const keep = [];
-    for (const it of ordered) {
-      try {
-        const fixedPayload = {
-  ...it.payload,
-  notes: it.payload.notes || it.payload.note || '',
-  paid_amount: it.payload.paid_amount !== '' && it.payload.paid_amount !== undefined
-    ? Number(it.payload.paid_amount)
-    : null,
-	};
-delete fixedPayload.note;
-delete fixedPayload.cashier_id;
-await salesAPI.create(fixedPayload);
-      } catch {
+  const ordered = [...pending].reverse();
+  const keep = [];
+  const dead = [];
+
+  for (const it of ordered) {
+    try {
+      const fixedPayload = {
+        ...it.payload,
+        notes: it.payload.notes || it.payload.note || '',
+        paid_amount:
+          it.payload.paid_amount !== '' && it.payload.paid_amount !== undefined
+            ? Number(it.payload.paid_amount)
+            : null,
+      };
+      delete fixedPayload.note;
+      delete fixedPayload.cashier_id;
+      await salesAPI.create(fixedPayload);
+    } catch (err) {
+      const status = err?.response?.status;
+
+      if (status === 400 || status === 404) {
+        dead.push(it);
+        console.warn(`🗑️ تم حذف عملية offline فاشلة #${it.id}:`, err?.response?.data);
+        pushToast(
+          'warning',
+          `⚠️ تم حذف عملية غير صالحة: ${JSON.stringify(err?.response?.data)}`,
+          { duration: 7000, dismissible: true }
+        );
+      } else {
         keep.push(it);
       }
     }
-    const remaining = keep.reverse();
-    savePendingSales(remaining);
+  }
 
-    const sentCount = pending.length - remaining.length;
-    if (sentCount > 0) pushToast('success', `✅ تمت مزامنة ${sentCount} عملية`, { duration: 3000 });
-  }, [loadPendingSales, savePendingSales, pushToast]);
+  const remaining = keep.reverse();
+  savePendingSales(remaining);
+
+  const sentCount = pending.length - remaining.length - dead.length;
+  if (sentCount > 0)
+    pushToast('success', `✅ تمت مزامنة ${sentCount} عملية`, { duration: 3000 });
+  if (dead.length > 0)
+    pushToast('error', `❌ تم تجاهل ${dead.length} عملية غير صالحة نهائياً`, {
+      duration: 5000,
+      dismissible: true,
+    });
+}, [loadPendingSales, savePendingSales, pushToast]);
+
 
   useEffect(() => {
     const onOnline = () => {
