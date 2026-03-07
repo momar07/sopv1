@@ -10,12 +10,14 @@ const Badge = ({ label, color }) => {
     yellow: 'bg-yellow-100 text-yellow-800',
     blue:   'bg-blue-100 text-blue-800',
     gray:   'bg-gray-100 text-gray-600',
+    purple: 'bg-purple-100 text-purple-800',
   };
   return <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${map[color]||map.gray}`}>{label}</span>;
 };
 
-const statusColor = (s) => ({ draft:'gray', ordered:'blue', received:'green', cancelled:'red' }[s]||'gray');
-const alertColor  = (t) => ({ out:'red', low:'yellow', expiry:'yellow' }[t]||'gray');
+const statusColor  = (s) => ({ draft:'gray', ordered:'blue', received:'green', cancelled:'red' }[s]||'gray');
+const alertColor   = (t) => ({ out:'red', low:'yellow', expiry:'yellow' }[t]||'gray');
+const movementColor= (t) => ({ sale:'red', purchase:'green', adjustment:'blue', return:'purple', initial:'gray' }[t]||'gray');
 
 const Spinner = () => (
   <div className="flex items-center justify-center h-40">
@@ -50,13 +52,13 @@ const Field = ({ label, children }) => (
 
 const INP = 'w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white transition';
 
-// ═══════════════════════════════════════════════════════════════════════════
 export default function InventoryPage() {
   const [tab, setTab] = useState('summary');
   const tabs = [
     { key:'summary',   label:'📊 ملخص المخزون' },
     { key:'orders',    label:'📦 أوامر الشراء'  },
     { key:'adjust',    label:'⚖️ تسوية المخزون' },
+    { key:'movements', label:'🔄 حركة المخزون'  },
     { key:'alerts',    label:'🔔 التنبيهات'     },
     { key:'suppliers', label:'🏭 الموردون'       },
   ];
@@ -64,7 +66,7 @@ export default function InventoryPage() {
     <div dir="rtl" className="p-4 min-h-screen bg-gray-50">
       <div className="mb-5">
         <h1 className="text-2xl font-black text-gray-800">🏪 إدارة المخزون</h1>
-        <p className="text-gray-500 text-sm mt-1">استلام البضاعة · تسوية المخزون · تنبيهات النقص</p>
+        <p className="text-gray-500 text-sm mt-1">استلام البضاعة · تسوية المخزون · تنبيهات النقص · حركات المخزون</p>
       </div>
       <div className="flex gap-2 flex-wrap mb-5">
         {tabs.map((t) => (
@@ -77,13 +79,14 @@ export default function InventoryPage() {
       {tab==='summary'   && <SummaryPanel />}
       {tab==='orders'    && <PurchaseOrdersPanel />}
       {tab==='adjust'    && <AdjustPanel />}
+      {tab==='movements' && <MovementsPanel />}
       {tab==='alerts'    && <AlertsPanel />}
       {tab==='suppliers' && <SuppliersPanel />}
     </div>
   );
 }
 
-// ─── Summary ─────────────────────────────────────────────────────────────────
+// Summary
 function SummaryPanel() {
   const [summary, setSummary]         = useState(null);
   const [lowProducts, setLow]         = useState([]);
@@ -110,14 +113,17 @@ function SummaryPanel() {
   useEffect(()=>{ load(); }, [load]);
 
   const handleGenerate = async () => {
-    await inventoryAPI.checkAndGenerateAlerts({ threshold:10 });
-    load();
+    try {
+      const r = await inventoryAPI.checkAndGenerateAlerts({ threshold:10 });
+      notify(`تم انشاء ${r.data.created_alerts} تنبيه جديد`);
+      load();
+    } catch { notify('خطأ في توليد التنبيهات','error'); }
   };
 
   if (loading) return <Spinner />;
 
   const cards = [
-    { label:'إجمالي المنتجات',    value: summary?.total_products   ||0, color:'blue',   icon:'📦' },
+    { label:'اجمالي المنتجات',    value: summary?.total_products   ||0, color:'blue',   icon:'📦' },
     { label:'مخزون منخفض',        value: summary?.low_stock        ||0, color:'yellow', icon:'⚠️' },
     { label:'نفاد المخزون',        value: summary?.out_of_stock     ||0, color:'red',    icon:'🚨' },
     { label:'مخزون كافي',          value: summary?.healthy_stock    ||0, color:'green',  icon:'✅' },
@@ -133,7 +139,6 @@ function SummaryPanel() {
   return (
     <div className="space-y-6">
       {toast && <Toast msg={toast.msg} type={toast.type} />}
-
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {cards.map((c) => (
           <div key={c.label} className={`rounded-2xl border p-4 ${cm[c.color]}`}>
@@ -143,16 +148,14 @@ function SummaryPanel() {
           </div>
         ))}
       </div>
-
       <button onClick={handleGenerate}
         className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition">
         🔄 فحص وتحديث التنبيهات
       </button>
-
       {lowProducts.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b bg-yellow-50">
-            <h2 className="font-black text-yellow-800">⚠️ منتجات تحتاج إعادة طلب ({lowProducts.length})</h2>
+            <h2 className="font-black text-yellow-800">⚠️ منتجات تحتاج اعادة طلب ({lowProducts.length})</h2>
           </div>
           <table className="w-full text-sm">
             <thead>
@@ -161,7 +164,7 @@ function SummaryPanel() {
                 <th className="px-4 py-3 font-bold">الباركود</th>
                 <th className="px-4 py-3 font-bold">المخزون</th>
                 <th className="px-4 py-3 font-bold">سعر البيع</th>
-                <th className="px-4 py-3 font-bold">إجراء</th>
+                <th className="px-4 py-3 font-bold">اجراء</th>
               </tr>
             </thead>
             <tbody>
@@ -174,8 +177,7 @@ function SummaryPanel() {
                   </td>
                   <td className="px-4 py-3">{fmt(p.price)} ج</td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => setQuick(p)}
+                    <button onClick={() => setQuick(p)}
                       className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
                       📦 طلب شراء
                     </button>
@@ -186,21 +188,20 @@ function SummaryPanel() {
           </table>
         </div>
       )}
-
       {quickOrderProduct && (
         <QuickOrderModal
           product={quickOrderProduct}
           suppliers={suppliers}
           onClose={() => setQuick(null)}
-          onSaved={() => { setQuick(null); notify('✅ تم إنشاء طلب الشراء بنجاح'); }}
-          onError={(msg) => notify('❌ ' + msg, 'error')}
+          onSaved={() => { setQuick(null); notify('تم انشاء طلب الشراء بنجاح'); }}
+          onError={(msg) => notify('خطأ: ' + msg, 'error')}
         />
       )}
     </div>
   );
 }
 
-// ─── Purchase Orders ──────────────────────────────────────────────────────────
+// Purchase Orders
 function PurchaseOrdersPanel() {
   const [orders, setOrders]       = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -230,15 +231,15 @@ function PurchaseOrdersPanel() {
   const handleReceive = async (order, receivedQtys) => {
     try {
       await inventoryAPI.receivePurchaseOrder(order.id, { received_quantities: receivedQtys });
-      notify('✅ تم استلام البضاعة وتحديث المخزون');
+      notify('تم استلام البضاعة وتحديث المخزون');
       setSelected(null); load();
-    } catch(e) { notify('❌ '+(e?.response?.data?.error||'خطأ في الاستلام'),'error'); }
+    } catch(e) { notify('خطأ: '+(e?.response?.data?.error||'خطأ في الاستلام'),'error'); }
   };
 
   const handleCancel = async (id) => {
-    if (!window.confirm('هل أنت متأكد من إلغاء الأمر؟')) return;
-    try { await inventoryAPI.cancelPurchaseOrder(id); notify('تم الإلغاء'); load(); }
-    catch(e) { notify('❌ '+(e?.response?.data?.error||'خطأ'),'error'); }
+    if (!window.confirm('هل انت متاكد من الغاء الامر؟')) return;
+    try { await inventoryAPI.cancelPurchaseOrder(id); notify('تم الالغاء'); load(); }
+    catch(e) { notify('خطأ: '+(e?.response?.data?.error||'خطأ'),'error'); }
   };
 
   if (loading) return <Spinner />;
@@ -247,10 +248,10 @@ function PurchaseOrdersPanel() {
     <div className="space-y-4">
       {toast && <Toast msg={toast.msg} type={toast.type} />}
       <div className="flex justify-between items-center">
-        <h2 className="font-black text-gray-700 text-lg">أوامر الشراء</h2>
+        <h2 className="font-black text-gray-700 text-lg">اوامر الشراء</h2>
         <button onClick={()=>setShowForm(true)}
           className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-sm">
-          ➕ أمر شراء جديد
+          ➕ امر شراء جديد
         </button>
       </div>
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -259,12 +260,12 @@ function PurchaseOrdersPanel() {
             <th className="px-4 py-3 font-bold">رقم المرجع</th>
             <th className="px-4 py-3 font-bold">المورد</th>
             <th className="px-4 py-3 font-bold">الحالة</th>
-            <th className="px-4 py-3 font-bold">الإجمالي</th>
+            <th className="px-4 py-3 font-bold">الاجمالي</th>
             <th className="px-4 py-3 font-bold">التاريخ</th>
-            <th className="px-4 py-3 font-bold">إجراءات</th>
+            <th className="px-4 py-3 font-bold">اجراءات</th>
           </tr></thead>
           <tbody>
-            {orders.length===0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">لا توجد أوامر شراء</td></tr>}
+            {orders.length===0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">لا توجد اوامر شراء</td></tr>}
             {orders.map((o)=>(
               <tr key={o.id} className="border-t hover:bg-gray-50">
                 <td className="px-4 py-3 font-bold text-blue-700">{o.reference_number}</td>
@@ -282,7 +283,7 @@ function PurchaseOrdersPanel() {
                   {o.status!=='received'&&o.status!=='cancelled' && (
                     <button onClick={()=>handleCancel(o.id)}
                       className="bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold px-3 py-1 rounded-lg">
-                      ❌ إلغاء
+                      الغاء
                     </button>
                   )}
                 </td>
@@ -294,8 +295,8 @@ function PurchaseOrdersPanel() {
       {showForm && (
         <NewOrderModal suppliers={suppliers} products={products}
           onClose={()=>setShowForm(false)}
-          onSaved={()=>{ setShowForm(false); load(); notify('✅ تم إنشاء أمر الشراء'); }}
-          onError={(msg)=>notify('❌ '+msg,'error')} />
+          onSaved={()=>{ setShowForm(false); load(); notify('تم انشاء امر الشراء'); }}
+          onError={(msg)=>notify('خطأ: '+msg,'error')} />
       )}
       {selected && (
         <ReceiveModal order={selected} onClose={()=>setSelected(null)} onReceive={handleReceive} />
@@ -319,7 +320,7 @@ function NewOrderModal({ suppliers, products, onClose, onSaved, onError }) {
   const handleSave = async () => {
     if (!form.reference_number) return onError('رقم المرجع مطلوب');
     const valid = items.filter(it=>it.product&&it.quantity>0&&it.unit_cost);
-    if (!valid.length) return onError('أضف منتجاً واحداً على الأقل');
+    if (!valid.length) return onError('اضف منتجا واحدا على الاقل');
     setSaving(true);
     try {
       await inventoryAPI.createPurchaseOrder({
@@ -332,7 +333,7 @@ function NewOrderModal({ suppliers, products, onClose, onSaved, onError }) {
   };
 
   return (
-    <Modal title="➕ أمر شراء جديد" onClose={onClose}>
+    <Modal title="امر شراء جديد" onClose={onClose}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label="رقم المرجع *">
@@ -365,7 +366,7 @@ function NewOrderModal({ suppliers, products, onClose, onSaved, onError }) {
         <div>
           <div className="flex justify-between items-center mb-2">
             <span className="font-bold text-gray-700 text-sm">المنتجات</span>
-            <button onClick={addItem} className="text-blue-600 text-sm font-bold hover:underline">+ إضافة منتج</button>
+            <button onClick={addItem} className="text-blue-600 text-sm font-bold hover:underline">+ اضافة منتج</button>
           </div>
           {items.map((item,i)=>(
             <div key={i} className="flex gap-2 mb-2 items-end">
@@ -392,10 +393,10 @@ function NewOrderModal({ suppliers, products, onClose, onSaved, onError }) {
           ))}
         </div>
         <div className="flex gap-3 justify-end pt-2">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">إلغاء</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">الغاء</button>
           <button onClick={handleSave} disabled={saving}
             className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2 rounded-xl text-sm">
-            {saving?'...':'💾 حفظ'}
+            {saving?'...':'حفظ'}
           </button>
         </div>
       </div>
@@ -413,12 +414,12 @@ function ReceiveModal({ order, onClose, onReceive }) {
   }, [order]);
   const handleSubmit = async () => { setRec(true); await onReceive(order,qtys); setRec(false); };
   return (
-    <Modal title={`📥 استلام أمر #${order.reference_number}`} onClose={onClose}>
+    <Modal title={`استلام امر #${order.reference_number}`} onClose={onClose}>
       <table className="w-full text-sm mb-4">
         <thead><tr className="bg-gray-50 text-gray-500 text-right">
           <th className="px-3 py-2 font-bold">المنتج</th>
           <th className="px-3 py-2 font-bold">مطلوب</th>
-          <th className="px-3 py-2 font-bold">مستلم فعلياً</th>
+          <th className="px-3 py-2 font-bold">مستلم فعليا</th>
         </tr></thead>
         <tbody>
           {(order.items||[]).map(it=>(
@@ -436,17 +437,17 @@ function ReceiveModal({ order, onClose, onReceive }) {
         </tbody>
       </table>
       <div className="flex gap-3 justify-end">
-        <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">إلغاء</button>
+        <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">الغاء</button>
         <button onClick={handleSubmit} disabled={receiving}
           className="bg-green-600 hover:bg-green-700 text-white font-bold px-5 py-2 rounded-xl text-sm">
-          {receiving?'...':'📥 تأكيد الاستلام'}
+          {receiving?'...':'تاكيد الاستلام'}
         </button>
       </div>
     </Modal>
   );
 }
 
-// ─── Stock Adjustment ─────────────────────────────────────────────────────────
+// Stock Adjustment
 function AdjustPanel() {
   const [adjustments, setAdj]   = useState([]);
   const [products, setProducts] = useState([]);
@@ -471,7 +472,7 @@ function AdjustPanel() {
   useEffect(()=>{ load(); }, [load]);
 
   const handleSave = async () => {
-    if (!form.product||!form.quantity_change) return notify('❌ اختر المنتج وأدخل الكمية','error');
+    if (!form.product||!form.quantity_change) return notify('اختر المنتج وادخل الكمية','error');
     setSaving(true);
     try {
       await inventoryAPI.createAdjustment({
@@ -480,11 +481,11 @@ function AdjustPanel() {
         reason: form.reason,
         notes: form.notes,
       });
-      notify('✅ تمت التسوية بنجاح');
+      notify('تمت التسوية بنجاح');
       setForm({ product:'', quantity_change:'', reason:'count', notes:'' });
       load();
     } catch(e) {
-      notify('❌ '+(e?.response?.data?.[0]||JSON.stringify(e?.response?.data)||'خطأ'),'error');
+      notify('خطأ: '+(e?.response?.data?.[0]||JSON.stringify(e?.response?.data)||'خطأ'),'error');
     } finally { setSaving(false); }
   };
 
@@ -492,14 +493,14 @@ function AdjustPanel() {
 
   const reasonLabels = {
     count:'جرد دوري', damage:'تلف', loss:'فقد/سرقة',
-    return:'مرتجع', expiry:'انتهاء صلاحية', other:'أخرى',
+    return:'مرتجع', expiry:'انتهاء صلاحية', other:'اخرى',
   };
 
   return (
     <div className="space-y-5">
       {toast && <Toast msg={toast.msg} type={toast.type} />}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-        <h2 className="font-black text-gray-700 mb-4">⚖️ تسوية مخزون جديدة</h2>
+        <h2 className="font-black text-gray-700 mb-4">تسوية مخزون جديدة</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           <Field label="المنتج *">
             <select className={INP} value={form.product}
@@ -508,8 +509,8 @@ function AdjustPanel() {
               {products.map(p=><option key={p.id} value={p.id}>{p.name} ({p.stock})</option>)}
             </select>
           </Field>
-          <Field label="الكمية (+ إضافة / - خصم) *">
-            <input type="number" className={INP} placeholder="مثال: 10 أو -5"
+          <Field label="الكمية (+ اضافة / - خصم) *">
+            <input type="number" className={INP} placeholder="مثال: 10 او -5"
               value={form.quantity_change}
               onChange={e=>setForm({...form,quantity_change:e.target.value})} />
           </Field>
@@ -526,7 +527,7 @@ function AdjustPanel() {
         </div>
         <button onClick={handleSave} disabled={saving}
           className="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2 rounded-xl text-sm">
-          {saving?'...':'💾 تطبيق التسوية'}
+          {saving?'...':'تطبيق التسوية'}
         </button>
       </div>
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -567,7 +568,105 @@ function AdjustPanel() {
   );
 }
 
-// ─── Alerts ───────────────────────────────────────────────────────────────────
+// Movements
+function MovementsPanel() {
+  const [movements, setMovements] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [filter, setFilter]       = useState('');
+  const [products, setProducts]   = useState([]);
+  const [selProduct, setSelProd]  = useState('');
+  const [toast, setToast]         = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (filter)     params.movement_type = filter;
+      if (selProduct) params.product       = selProduct;
+      const [mv, pr] = await Promise.all([
+        inventoryAPI.getMovements(params),
+        productsAPI.getAll({ page_size:200 }),
+      ]);
+      setMovements(mv.data?.results || mv.data || []);
+      setProducts(pr.data?.results  || pr.data  || []);
+    } catch {/**/ } finally { setLoading(false); }
+  }, [filter, selProduct]);
+
+  useEffect(()=>{ load(); }, [load]);
+
+  const typeLabels = {
+    '':'الكل', sale:'بيع', purchase:'شراء',
+    adjustment:'تسوية', return:'مرتجع', initial:'رصيد افتتاحي',
+  };
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div className="space-y-4">
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex gap-2 flex-wrap">
+          {Object.entries(typeLabels).map(([k,v])=>(
+            <button key={k} onClick={()=>setFilter(k)}
+              className={`px-3 py-1.5 rounded-xl text-sm font-bold ${
+                filter===k?'bg-blue-600 text-white':'bg-white border text-gray-600'
+              }`}>{v}</button>
+          ))}
+        </div>
+        <select className={INP+' w-48'} value={selProduct}
+          onChange={e=>setSelProd(e.target.value)}>
+          <option value="">كل المنتجات</option>
+          {products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b bg-gray-50 flex justify-between items-center">
+          <span className="font-black text-gray-700">سجل حركات المخزون</span>
+          <span className="text-sm text-gray-500">{movements.length} حركة</span>
+        </div>
+        <table className="w-full text-sm">
+          <thead><tr className="bg-gray-50 text-gray-500 text-right">
+            <th className="px-4 py-3 font-bold">المنتج</th>
+            <th className="px-4 py-3 font-bold">النوع</th>
+            <th className="px-4 py-3 font-bold">الكمية</th>
+            <th className="px-4 py-3 font-bold">قبل</th>
+            <th className="px-4 py-3 font-bold">بعد</th>
+            <th className="px-4 py-3 font-bold">المرجع</th>
+            <th className="px-4 py-3 font-bold">الموظف</th>
+            <th className="px-4 py-3 font-bold">التاريخ</th>
+          </tr></thead>
+          <tbody>
+            {movements.length===0 && (
+              <tr><td colSpan={8} className="text-center py-8 text-gray-400">
+                لا توجد حركات مخزون — ستظهر هنا عند اجراء عمليات بيع او شراء او تسوية
+              </td></tr>
+            )}
+            {movements.map(m=>(
+              <tr key={m.id} className="border-t hover:bg-gray-50">
+                <td className="px-4 py-3 font-bold">{m.product_name}</td>
+                <td className="px-4 py-3">
+                  <Badge label={m.movement_type_display} color={movementColor(m.movement_type)} />
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`font-black ${m.quantity>=0?'text-green-600':'text-red-600'}`}>
+                    {m.quantity>=0?'+':''}{m.quantity}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-gray-500">{m.stock_before}</td>
+                <td className="px-4 py-3 font-bold">{m.stock_after}</td>
+                <td className="px-4 py-3 text-blue-600 text-xs">{m.reference||'—'}</td>
+                <td className="px-4 py-3 text-gray-500">{m.user_name||'—'}</td>
+                <td className="px-4 py-3 text-gray-500">{m.created_at?.split('T')[0]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Alerts
 function AlertsPanel() {
   const [alerts, setAlerts]   = useState([]);
   const [loading, setLoading] = useState(true);
@@ -576,7 +675,7 @@ function AlertsPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = filter==='all' ? {} : { is_resolved: filter==='resolved' };
+      const params = filter==='all' ? {} : { is_resolved: filter==='resolved' ? 'true' : 'false' };
       const res = await inventoryAPI.getAlerts(params);
       setAlerts(res.data?.results||res.data||[]);
     } catch {/**/ } finally { setLoading(false); }
@@ -599,7 +698,7 @@ function AlertsPanel() {
             className={`px-3 py-1.5 rounded-xl text-sm font-bold ${
               filter===f?'bg-blue-600 text-white':'bg-white border text-gray-600'
             }`}>
-            {f==='all'?'الكل':f==='active'?'🔴 نشطة':'✅ محلولة'}
+            {f==='all'?'الكل':f==='active'?'نشطة':'محلولة'}
           </button>
         ))}
       </div>
@@ -613,7 +712,7 @@ function AlertsPanel() {
             <th className="px-4 py-3 font-bold">الحد</th>
             <th className="px-4 py-3 font-bold">الحالة</th>
             <th className="px-4 py-3 font-bold">التاريخ</th>
-            <th className="px-4 py-3 font-bold">إجراء</th>
+            <th className="px-4 py-3 font-bold">اجراء</th>
           </tr></thead>
           <tbody>
             {alerts.length===0 && (
@@ -623,20 +722,16 @@ function AlertsPanel() {
               <tr key={a.id} className="border-t hover:bg-gray-50">
                 <td className="px-4 py-3 font-bold">{a.product_name}</td>
                 <td className="px-4 py-3 text-gray-500 text-xs">{a.product_barcode||'—'}</td>
-                <td className="px-4 py-3">
-                  <Badge label={a.alert_type_display} color={alertColor(a.alert_type)} />
-                </td>
+                <td className="px-4 py-3"><Badge label={a.alert_type_display} color={alertColor(a.alert_type)} /></td>
                 <td className="px-4 py-3 font-black text-red-600">{a.current_stock}</td>
                 <td className="px-4 py-3">{a.threshold}</td>
-                <td className="px-4 py-3">
-                  <Badge label={a.is_resolved?'محلول':'نشط'} color={a.is_resolved?'green':'red'} />
-                </td>
+                <td className="px-4 py-3"><Badge label={a.is_resolved?'محلول':'نشط'} color={a.is_resolved?'green':'red'} /></td>
                 <td className="px-4 py-3 text-gray-500">{a.created_at?.split('T')[0]}</td>
                 <td className="px-4 py-3">
                   {!a.is_resolved && (
                     <button onClick={()=>handleResolve(a.id)}
                       className="bg-green-100 hover:bg-green-200 text-green-700 text-xs font-bold px-3 py-1 rounded-lg">
-                      ✅ حل
+                      حل
                     </button>
                   )}
                 </td>
@@ -649,7 +744,7 @@ function AlertsPanel() {
   );
 }
 
-// ─── Suppliers ────────────────────────────────────────────────────────────────
+// Suppliers
 function SuppliersPanel() {
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -672,15 +767,15 @@ function SuppliersPanel() {
     try {
       if (editing) await inventoryAPI.updateSupplier(editing.id, data);
       else         await inventoryAPI.createSupplier(data);
-      notify('✅ تم الحفظ');
+      notify('تم الحفظ');
       setShowForm(false); setEditing(null); load();
-    } catch(e) { notify('❌ '+JSON.stringify(e?.response?.data||'خطأ'),'error'); }
+    } catch(e) { notify('خطأ: '+JSON.stringify(e?.response?.data||'خطأ'),'error'); }
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm('حذف المورد؟')) return;
     try { await inventoryAPI.deleteSupplier(id); notify('تم الحذف'); load(); }
-    catch { notify('❌ خطأ في الحذف','error'); }
+    catch { notify('خطأ في الحذف','error'); }
   };
 
   if (loading) return <Spinner />;
@@ -692,13 +787,11 @@ function SuppliersPanel() {
         <h2 className="font-black text-gray-700 text-lg">الموردون</h2>
         <button onClick={()=>{ setEditing(null); setShowForm(true); }}
           className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-sm">
-          ➕ مورد جديد
+          مورد جديد
         </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {suppliers.length===0 && (
-          <p className="text-gray-400 col-span-3 text-center py-8">لا يوجد موردون</p>
-        )}
+        {suppliers.length===0 && <p className="text-gray-400 col-span-3 text-center py-8">لا يوجد موردون</p>}
         {suppliers.map(s=>(
           <div key={s.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
             <div className="flex justify-between items-start">
@@ -706,21 +799,18 @@ function SuppliersPanel() {
                 <div className="font-black text-gray-800">{s.name}</div>
                 {s.phone && <div className="text-sm text-gray-500 mt-1">📞 {s.phone}</div>}
                 {s.email && <div className="text-sm text-gray-500">✉️ {s.email}</div>}
-                <div className="text-xs text-blue-600 mt-2 font-bold">{s.orders_count} أوامر شراء</div>
+                <div className="text-xs text-blue-600 mt-2 font-bold">{s.orders_count} اوامر شراء</div>
               </div>
               <div className="flex gap-2">
-                <button onClick={()=>{ setEditing(s); setShowForm(true); }}
-                  className="text-blue-500 hover:text-blue-700 text-sm">✏️</button>
-                <button onClick={()=>handleDelete(s.id)}
-                  className="text-red-400 hover:text-red-600 text-sm">🗑️</button>
+                <button onClick={()=>{ setEditing(s); setShowForm(true); }} className="text-blue-500 hover:text-blue-700 text-sm">✏️</button>
+                <button onClick={()=>handleDelete(s.id)} className="text-red-400 hover:text-red-600 text-sm">🗑️</button>
               </div>
             </div>
           </div>
         ))}
       </div>
       {showForm && (
-        <SupplierModal
-          initial={editing}
+        <SupplierModal initial={editing}
           onClose={()=>{ setShowForm(false); setEditing(null); }}
           onSave={handleSave} />
       )}
@@ -733,151 +823,100 @@ function SupplierModal({ initial, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
   const handle = async () => { setSaving(true); await onSave(form); setSaving(false); };
   return (
-    <Modal title={initial?'✏️ تعديل المورد':'➕ مورد جديد'} onClose={onClose}>
+    <Modal title={initial?'تعديل المورد':'مورد جديد'} onClose={onClose}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="الاسم *">
-            <input className={INP} value={form.name}
-              onChange={e=>setForm({...form,name:e.target.value})} />
-          </Field>
-          <Field label="الهاتف">
-            <input className={INP} value={form.phone||''}
-              onChange={e=>setForm({...form,phone:e.target.value})} />
-          </Field>
-          <Field label="البريد الإلكتروني">
-            <input className={INP} value={form.email||''}
-              onChange={e=>setForm({...form,email:e.target.value})} />
-          </Field>
-          <Field label="العنوان">
-            <input className={INP} value={form.address||''}
-              onChange={e=>setForm({...form,address:e.target.value})} />
-          </Field>
+          <Field label="الاسم *"><input className={INP} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} /></Field>
+          <Field label="الهاتف"><input className={INP} value={form.phone||''} onChange={e=>setForm({...form,phone:e.target.value})} /></Field>
+          <Field label="البريد الالكتروني"><input className={INP} value={form.email||''} onChange={e=>setForm({...form,email:e.target.value})} /></Field>
+          <Field label="العنوان"><input className={INP} value={form.address||''} onChange={e=>setForm({...form,address:e.target.value})} /></Field>
         </div>
-        <Field label="ملاحظات">
-          <textarea className={INP} rows={2} value={form.notes||''}
-            onChange={e=>setForm({...form,notes:e.target.value})} />
-        </Field>
+        <Field label="ملاحظات"><textarea className={INP} rows={2} value={form.notes||''} onChange={e=>setForm({...form,notes:e.target.value})} /></Field>
         <div className="flex gap-3 justify-end">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">إلغاء</button>
-          <button onClick={handle} disabled={saving}
-            className="bg-blue-600 text-white font-bold px-5 py-2 rounded-xl text-sm">
-            {saving?'...':'💾 حفظ'}
-          </button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">الغاء</button>
+          <button onClick={handle} disabled={saving} className="bg-blue-600 text-white font-bold px-5 py-2 rounded-xl text-sm">{saving?'...':'حفظ'}</button>
         </div>
       </div>
     </Modal>
   );
 }
 
-// ─── Quick Order Modal ────────────────────────────────────────────────────────
+// Quick Order Modal
 function QuickOrderModal({ product, suppliers, onClose, onSaved, onError }) {
   const [form, setForm] = useState({
     reference_number: `PO-${Date.now()}`,
-    supplier:         '',
-    expected_date:    '',
-    notes:            '',
-    status:           'ordered',
+    supplier: '', expected_date: '', notes: '', status: 'ordered',
   });
   const [quantity,  setQuantity] = useState(10);
   const [unit_cost, setUnitCost] = useState(product.cost || '');
   const [saving,    setSaving]   = useState(false);
 
   const handleSave = async () => {
-    if (!quantity || Number(quantity) <= 0) return onError('الكمية يجب أن تكون أكبر من صفر');
-    if (!unit_cost || Number(unit_cost) <= 0) return onError('أدخل تكلفة الوحدة');
+    if (!quantity || Number(quantity) <= 0) return onError('الكمية يجب ان تكون اكبر من صفر');
+    if (!unit_cost || Number(unit_cost) <= 0) return onError('ادخل تكلفة الوحدة');
     setSaving(true);
     try {
       await inventoryAPI.createPurchaseOrder({
         ...form,
         supplier: form.supplier || null,
-        items: [{
-          product:   product.id,
-          quantity:  Number(quantity),
-          unit_cost: Number(unit_cost),
-        }],
+        items: [{ product: product.id, quantity: Number(quantity), unit_cost: Number(unit_cost) }],
       });
       onSaved();
     } catch(e) {
       onError(JSON.stringify(e?.response?.data || 'خطأ'));
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   return (
-    <Modal title={`📦 طلب شراء سريع`} onClose={onClose}>
+    <Modal title={`طلب شراء سريع`} onClose={onClose}>
       <div className="space-y-4">
-
         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 flex items-center gap-3">
           <div className="text-3xl">⚠️</div>
           <div>
             <div className="font-black text-gray-800">{product.name}</div>
             <div className="text-sm text-gray-500 mt-0.5">
-              الباركود: {product.barcode || '—'}
-              {' | '}
-              المخزون الحالي:{' '}
-              <span className={`font-black ${product.stock===0?'text-red-600':'text-yellow-600'}`}>
-                {product.stock}
-              </span>
+              الباركود: {product.barcode||'—'} | المخزون الحالي:&nbsp;
+              <span className={`font-black ${product.stock===0?'text-red-600':'text-yellow-600'}`}>{product.stock}</span>
             </div>
           </div>
         </div>
-
         <div className="grid grid-cols-2 gap-3">
           <Field label="رقم المرجع *">
-            <input className={INP} value={form.reference_number}
-              onChange={e=>setForm({...form, reference_number: e.target.value})} />
+            <input className={INP} value={form.reference_number} onChange={e=>setForm({...form,reference_number:e.target.value})} />
           </Field>
           <Field label="المورد">
-            <select className={INP} value={form.supplier}
-              onChange={e=>setForm({...form, supplier: e.target.value})}>
+            <select className={INP} value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}>
               <option value="">بدون مورد</option>
               {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </Field>
           <Field label="الكمية المطلوبة *">
-            <input type="number" min={1} className={INP} value={quantity}
-              onChange={e=>setQuantity(e.target.value)} />
+            <input type="number" min={1} className={INP} value={quantity} onChange={e=>setQuantity(e.target.value)} />
           </Field>
           <Field label="تكلفة الوحدة *">
-            <input type="number" min={0} step="0.01" className={INP} value={unit_cost}
-              onChange={e=>setUnitCost(e.target.value)} />
+            <input type="number" min={0} step="0.01" className={INP} value={unit_cost} onChange={e=>setUnitCost(e.target.value)} />
           </Field>
           <Field label="تاريخ الاستلام المتوقع">
-            <input type="date" className={INP} value={form.expected_date}
-              onChange={e=>setForm({...form, expected_date: e.target.value})} />
+            <input type="date" className={INP} value={form.expected_date} onChange={e=>setForm({...form,expected_date:e.target.value})} />
           </Field>
           <Field label="الحالة">
-            <select className={INP} value={form.status}
-              onChange={e=>setForm({...form, status: e.target.value})}>
+            <select className={INP} value={form.status} onChange={e=>setForm({...form,status:e.target.value})}>
               <option value="draft">مسودة</option>
               <option value="ordered">تم الطلب</option>
             </select>
           </Field>
         </div>
-
         <Field label="ملاحظات">
-          <textarea className={INP} rows={2} value={form.notes}
-            onChange={e=>setForm({...form, notes: e.target.value})} />
+          <textarea className={INP} rows={2} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} />
         </Field>
-
-        {Number(quantity) > 0 && Number(unit_cost) > 0 && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm">
-            <span className="text-gray-600">إجمالي التكلفة المتوقعة: </span>
-            <span className="font-black text-blue-700 text-base">
-              {fmt(Number(quantity) * Number(unit_cost))} ج
-            </span>
-          </div>
-        )}
-
-        <div className="flex gap-3 justify-end pt-1">
-          <button onClick={onClose}
-            className="px-4 py-2 rounded-xl border font-bold text-sm text-gray-600 hover:bg-gray-50">
-            إلغاء
-          </button>
+        <div className="bg-blue-50 rounded-xl p-3 text-sm font-bold text-blue-700">
+          الاجمالي المتوقع: {fmt(Number(quantity||0) * Number(unit_cost||0))} ج
+        </div>
+        <div className="flex gap-3 justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">الغاء</button>
           <button onClick={handleSave} disabled={saving}
             className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2 rounded-xl text-sm">
-            {saving ? '...' : '💾 إنشاء الطلب'}
+            {saving?'...':'حفظ الطلب'}
           </button>
         </div>
       </div>
