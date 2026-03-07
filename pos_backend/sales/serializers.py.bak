@@ -41,6 +41,7 @@ class SaleSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'user']
 
+
     def get_user_name(self, obj):
         if obj.user:
             return obj.user.get_full_name() or obj.user.username
@@ -71,18 +72,11 @@ class SaleSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        from inventory.models import StockMovement
-
         items_data = validated_data.pop('items', [])
         sale = Sale.objects.create(**validated_data)
 
-        # المستخدم من الـ request context
-        user = None
-        request = self.context.get('request')
-        if request and hasattr(request, 'user'):
-            user = request.user
-
         for item_data in items_data:
+            # ✅ قبول product_id أو product من الـ Frontend
             product_id = item_data.pop('product_id', None) or item_data.get('product')
             if not product_id:
                 raise serializers.ValidationError(
@@ -102,35 +96,24 @@ class SaleSerializer(serializers.ModelSerializer):
                     f"كمية غير صحيحة للمنتج: {product.name}"
                 )
 
-            stock_before = product.stock
-
-            # ✅ خصم المخزون atomic مع التحقق من الكفاية
+            # ✅ إصلاح Race Condition — خصم المخزون في عملية atomic واحدة
+            # بيتحقق من الـ stock ويخصم في نفس اللحظة بدون فرصة لـ race condition
             updated_rows = Product.objects.filter(
                 id=product.id,
-                stock__gte=qty
-            ).update(stock=F('stock') - qty)
+                stock__gte=qty        # شرط الـ stock كافي داخل الـ UPDATE نفسها
+            ).update(
+                stock=F('stock') - qty
+            )
 
             if not updated_rows:
+                # لو updated_rows = 0 معناه الـ stock كان أقل من الـ qty
                 product.refresh_from_db()
                 raise serializers.ValidationError(
                     f"المخزون غير كافي للمنتج '{product.name}' — "
                     f"المتاح: {product.stock}, المطلوب: {qty}"
                 )
 
-            stock_after = stock_before - qty
-
-            # ✅ تسجيل حركة المخزون (StockMovement)
-            StockMovement.objects.create(
-                product=product,
-                movement_type='sale',
-                quantity=-qty,                  # سالب لأنه خصم
-                stock_before=stock_before,
-                stock_after=stock_after,
-                reference=sale.invoice_number or str(sale.id)[:8],
-                notes=f"بيع فاتورة #{sale.invoice_number or str(sale.id)[:8]}",
-                user=user,
-            )
-
+            # ✅ إصلاح product_name — يتسجل تلقائي من المنتج لو مش موجود
             item_data['product_name'] = item_data.get('product_name') or product.name
 
             SaleItem.objects.create(
@@ -139,7 +122,7 @@ class SaleSerializer(serializers.ModelSerializer):
                 **item_data
             )
 
-        # تحديث بيانات العميل
+        # ✅ تحديث إجمالي مشتريات العميل لو الفاتورة مكتملة
         if sale.customer and sale.status == 'completed':
             sale.customer.total_purchases += sale.total
             sale.customer.points += int(sale.total)
@@ -149,6 +132,7 @@ class SaleSerializer(serializers.ModelSerializer):
 
 
 class SaleListSerializer(serializers.ModelSerializer):
+    """Serializer مبسط لقائمة المبيعات"""
     customer_name = serializers.CharField(source='customer.name', read_only=True)
     user_name = serializers.SerializerMethodField()
     items_count = serializers.ReadOnlyField()
@@ -167,6 +151,7 @@ class SaleListSerializer(serializers.ModelSerializer):
 
 
 class SalesStatsSerializer(serializers.Serializer):
+    """Serializer لإحصائيات المبيعات"""
     today_sales = serializers.DecimalField(max_digits=10, decimal_places=2)
     today_count = serializers.IntegerField()
     week_sales = serializers.DecimalField(max_digits=10, decimal_places=2)

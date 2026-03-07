@@ -44,28 +44,23 @@ class ReturnViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(created_at__lte=end_date)
 
         user = self.request.user
-
         if user.is_superuser:
             return queryset.order_by('-created_at')
-
         if user.has_perm('users.sales_view_team'):
             queryset = queryset.filter(
                 Q(user=user) | Q(user__profile__manager=user)
             )
         else:
             queryset = queryset.filter(user=user)
-
         return queryset.order_by('-created_at')
 
     def perform_create(self, serializer):
         user = self.request.user
         if not (user.is_superuser or user.has_perm('users.returns_create')):
             raise PermissionDenied('ليس لديك صلاحية إنشاء مرتجع')
-
         cash_register = CashRegister.objects.filter(
             user=user, status='open'
         ).first()
-
         serializer.save(cash_register=cash_register)
 
     @action(detail=True, methods=['post'])
@@ -91,12 +86,13 @@ class ReturnViewSet(viewsets.ModelViewSet):
         """
         إكمال المرتجع بشكل ذري — يشمل:
           1. زيادة مخزون كل منتج مُرجَع
-          2. تسجيل StockAdjustment لكل منتج
-          3. تسجيل CashTransaction من نوع 'return'
-          4. تحديث CashRegister.total_returns و total_cash_returns
+          2. تسجيل StockMovement  (حركة المخزون — audit log)
+          3. تسجيل StockAdjustment (تسوية مخزون — سبب: مرتجع)
+          4. تسجيل CashTransaction  (حركة الخزنة — نوع: return)
+          5. تحديث CashRegister.total_returns و total_cash_returns
         """
         from products.models import Product
-        from inventory.models import StockAdjustment
+        from inventory.models import StockMovement, StockAdjustment
 
         user = request.user
         if not (user.is_superuser or user.has_perm('users.sales_view_team')):
@@ -112,10 +108,14 @@ class ReturnViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        invoice_ref = (
+            ret.sale.invoice_number if ret.sale else str(ret.pk)[:8]
+        )
+
         try:
             with transaction.atomic():
 
-                # ── 1. تحديث المخزون + تسجيل StockAdjustment ──────────
+                # ── 1 + 2 + 3. المخزون ─────────────────────────────────
                 return_items = ret.items.select_related('product').all()
 
                 for item in return_items:
@@ -127,14 +127,25 @@ class ReturnViewSet(viewsets.ModelViewSet):
                     )
                     stock_before = product.stock
 
-                    # زيادة المخزون
                     Product.objects.filter(pk=product.pk).update(
                         stock=F('stock') + item.quantity
                     )
 
                     stock_after = stock_before + item.quantity
 
-                    # تسجيل حركة مخزون
+                    # ✅ حركة مخزون (audit log كامل)
+                    StockMovement.objects.create(
+                        product=product,
+                        movement_type='return',
+                        quantity=item.quantity,          # موجب لأنه إضافة
+                        stock_before=stock_before,
+                        stock_after=stock_after,
+                        reference=invoice_ref,
+                        notes=f"مرتجع فاتورة #{invoice_ref}",
+                        user=user,
+                    )
+
+                    # ✅ تسوية مخزون (مع السبب)
                     StockAdjustment.objects.create(
                         product=product,
                         user=user,
@@ -142,13 +153,10 @@ class ReturnViewSet(viewsets.ModelViewSet):
                         quantity_change=item.quantity,
                         quantity_after=stock_after,
                         reason='return',
-                        notes=(
-                            f'مرتجع فاتورة '
-                            f'#{ret.sale.invoice_number if ret.sale else str(ret.pk)[:8]}'
-                        ),
+                        notes=f"مرتجع فاتورة #{invoice_ref}",
                     )
 
-                # ── 2. تسجيل حركة الخزنة ───────────────────────────────
+                # ── 4 + 5. الخزنة ──────────────────────────────────────
                 cash_register = ret.cash_register
 
                 if cash_register and cash_register.status == 'open':
@@ -161,15 +169,11 @@ class ReturnViewSet(viewsets.ModelViewSet):
                         cash_register=cash_register,
                         transaction_type='return',
                         amount=ret.total_amount,
-                        reason=(
-                            f'مرتجع فاتورة '
-                            f'#{ret.sale.invoice_number if ret.sale else str(ret.pk)[:8]}'
-                        ),
+                        reason=f"مرتجع فاتورة #{invoice_ref}",
                         note=ret.reason or '',
                         created_by=user,
                     )
 
-                    # ── 3. تحديث ملخص الخزنة ───────────────────────────
                     register_update = {
                         'total_returns': F('total_returns') + ret.total_amount
                     }
@@ -177,7 +181,6 @@ class ReturnViewSet(viewsets.ModelViewSet):
                         register_update['total_cash_returns'] = (
                             F('total_cash_returns') + ret.total_amount
                         )
-
                     CashRegister.objects.filter(pk=cash_register.pk).update(
                         **register_update
                     )
@@ -186,7 +189,7 @@ class ReturnViewSet(viewsets.ModelViewSet):
                         'complete_return: لا توجد خزنة مفتوحة للمرتجع %s', ret.pk
                     )
 
-                # ── 4. تغيير حالة المرتجع ──────────────────────────────
+                # ── 6. تغيير حالة المرتجع ─────────────────────────────
                 ret.status = 'completed'
                 ret.save(update_fields=['status'])
 
@@ -222,14 +225,10 @@ class ReturnViewSet(viewsets.ModelViewSet):
         today     = timezone.now().date()
         week_ago  = today - timedelta(days=7)
         month_ago = today - timedelta(days=30)
-
         base = self.get_queryset()
 
         def agg(qs):
-            return qs.aggregate(
-                total=Sum('total_amount'),
-                count=Count('id')
-            )
+            return qs.aggregate(total=Sum('total_amount'), count=Count('id'))
 
         today_stats   = agg(base.filter(created_at__date=today,          status='completed'))
         week_stats    = agg(base.filter(created_at__date__gte=week_ago,  status='completed'))
