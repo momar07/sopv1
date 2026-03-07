@@ -11,6 +11,13 @@ class ReturnItemSerializer(serializers.ModelSerializer):
     )
     sale_item_id = serializers.UUIDField(write_only=True)
 
+    # ✅ price اختياري عند الإنشاء — الـ backend يأخذه من sale_item.price
+    price = serializers.DecimalField(
+        max_digits=10, decimal_places=2,
+        required=False,
+        write_only=True,
+    )
+
     class Meta:
         model  = ReturnItem
         fields = [
