@@ -141,7 +141,11 @@ export const returnsAPI = {
   getAll: (params) => api.get('/returns/', { params }),
   getOne: (id) => api.get(`/returns/${id}/`),
   create: (data) => api.post('/returns/', data),
-  getStats: () => api.get('/returns/stats/'),
+  getStats:  () => api.get('/returns/stats/'),
+  approve:   (id) => api.post(`/returns/${id}/approve/`),
+  complete:  (id) => api.post(`/returns/${id}/complete/`),
+  reject:    (id) => api.post(`/returns/${id}/reject/`),
+
 };
 
 // Cash Register API

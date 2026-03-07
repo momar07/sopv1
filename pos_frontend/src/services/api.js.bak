@@ -186,6 +186,9 @@ export const inventoryAPI = {
   getAlertsSummary:      (params) => api.get('/inventory/alerts/summary/', { params }),
   checkAndGenerateAlerts:(data)   => api.post('/inventory/alerts/check_and_generate/', data),
   resolveAlert:          (id)     => api.post(`/inventory/alerts/${id}/resolve/`),
+
+  // Stock Movements
+  getMovements:          (params) => api.get('/inventory/movements/', { params }),
 };
 
 export default api;

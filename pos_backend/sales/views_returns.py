@@ -4,152 +4,178 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from django.db.models import Sum, Count, Q
+from django.utils import timezone
+from datetime import timedelta
 from .models import Return, ReturnItem
 from .serializers_returns import ReturnSerializer, ReturnListSerializer
 
 
 class ReturnViewSet(viewsets.ModelViewSet):
-    """ViewSet للمرتجعات"""
     queryset = Return.objects.all()
     permission_classes = [IsAuthenticated]
-    
+
     def get_serializer_class(self):
         if self.action == 'list':
             return ReturnListSerializer
         return ReturnSerializer
-    
+
     def get_queryset(self):
-        queryset = Return.objects.select_related('sale', 'user').prefetch_related('items')
-        
+        queryset = Return.objects.select_related(
+            'sale', 'user'
+        ).prefetch_related('items')
+
         # فلترة حسب الحالة
-        status_param = self.request.query_params.get('status', None)
+        status_param = self.request.query_params.get('status')
         if status_param:
             queryset = queryset.filter(status=status_param)
-        
+
         # فلترة حسب التاريخ
-        start_date = self.request.query_params.get('start_date', None)
-        end_date = self.request.query_params.get('end_date', None)
-        
+        start_date = self.request.query_params.get('start_date')
+        end_date   = self.request.query_params.get('end_date')
         if start_date:
             queryset = queryset.filter(created_at__gte=start_date)
         if end_date:
             queryset = queryset.filter(created_at__lte=end_date)
 
-        # RBAC scope: manager sees own + team, cashier sees own
         user = self.request.user
-        if user.is_superuser or user.has_perm('users.sales_view_team'):
-            queryset = queryset.filter(Q(user=user) | Q(user__profile__manager=user))
+
+        # ✅ إصلاح: superuser يشوف الكل بدون فلتر
+        if user.is_superuser:
+            return queryset.order_by('-created_at')
+
+        # Manager يشوف مرتجعاته + مرتجعات فريقه
+        if user.has_perm('users.sales_view_team'):
+            queryset = queryset.filter(
+                Q(user=user) | Q(user__profile__manager=user)
+            )
         else:
+            # Cashier يشوف مرتجعاته بس
             queryset = queryset.filter(user=user)
 
         return queryset.order_by('-created_at')
-    
+
     def perform_create(self, serializer):
-        # RBAC
+        # RBAC — فقط من عنده صلاحية returns_create
         user = self.request.user
         if not (user.is_superuser or user.has_perm('users.returns_create')):
-            raise PermissionDenied('Not authorized')
+            raise PermissionDenied('ليس لديك صلاحية إنشاء مرتجع')
 
-        """حفظ الشيفت الحالي مع المرتجع"""
-        print(f"[DEBUG] ========== perform_create started ==========")
-        print(f"[DEBUG] User: {self.request.user.username}")
-        print(f"[DEBUG] User authenticated: {self.request.user.is_authenticated}")
-        
         from .models_cashregister import CashRegister
-        
-        # البحث عن الشيفت المفتوح للمستخدم
         cash_register = None
-        if self.request.user.is_authenticated:
-            open_shifts = CashRegister.objects.filter(
-                user=self.request.user,
-                status='open'
+        if user.is_authenticated:
+            cash_register = CashRegister.objects.filter(
+                user=user, status='open'
+            ).first()
+
+        serializer.save(cash_register=cash_register)
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        """موافقة على المرتجع — للمدير والأدمن فقط"""
+        user = request.user
+        if not (user.is_superuser or user.has_perm('users.sales_view_team')):
+            return Response(
+                {'error': 'ليس لديك صلاحية الموافقة على المرتجع'},
+                status=status.HTTP_403_FORBIDDEN
             )
-            print(f"[DEBUG] Open shifts for {self.request.user.username}: {open_shifts.count()}")
-            
-            cash_register = open_shifts.first()
-            
-            # Debug
-            if cash_register:
-                print(f"[DEBUG Return] ✅ Found open shift: {cash_register.id}")
-                print(f"[DEBUG Return] Shift user: {cash_register.user.username}")
-                print(f"[DEBUG Return] Shift opened at: {cash_register.opened_at}")
-            else:
-                print(f"[DEBUG Return] ❌ No open cash register found for user {self.request.user.username}")
-                # عرض جميع الشيفتات المفتوحة
-                all_open = CashRegister.objects.filter(status='open')
-                print(f"[DEBUG] All open shifts: {all_open.count()}")
-                for s in all_open:
-                    print(f"  - Shift {s.id}: user={s.user.username}, opened={s.opened_at}")
-        
-        saved_return = serializer.save(cash_register=cash_register)
-        print(f"[DEBUG Return] ✅ Created return {saved_return.id}")
-        print(f"[DEBUG Return]    - Amount: {saved_return.total_amount}")
-        print(f"[DEBUG Return]    - Cash register: {saved_return.cash_register_id}")
-        print(f"[DEBUG Return]    - Status: {saved_return.status}")
-        print(f"[DEBUG] ========== perform_create finished ==========\n")
-    
-    @action(detail=False, methods=['GET'])
+        ret = self.get_object()
+        if ret.status != 'pending':
+            return Response(
+                {'error': f'لا يمكن الموافقة على مرتجع بحالة: {ret.status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        ret.status = 'approved'
+        ret.save(update_fields=['status'])
+        return Response(self.get_serializer(ret).data)
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        """إكمال المرتجع وإرجاع المخزون — للمدير والأدمن فقط"""
+        from django.db import transaction
+        from django.db.models import F, Sum
+        from products.models import Product
+
+        user = request.user
+        if not (user.is_superuser or user.has_perm('users.sales_view_team')):
+            return Response(
+                {'error': 'ليس لديك صلاحية إكمال المرتجع'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        ret = self.get_object()
+        if ret.status not in ('pending', 'approved'):
+            return Response(
+                {'error': f'لا يمكن إكمال مرتجع بحالة: {ret.status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with transaction.atomic():
+            for item in ret.items.select_related('product').all():
+                if item.product:
+                    Product.objects.filter(
+                        id=item.product.id
+                    ).update(stock=F('stock') + item.quantity)
+            ret.status = 'completed'
+            ret.save(update_fields=['status'])
+
+        return Response(self.get_serializer(ret).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """رفض المرتجع — للمدير والأدمن فقط"""
+        user = request.user
+        if not (user.is_superuser or user.has_perm('users.sales_view_team')):
+            return Response(
+                {'error': 'ليس لديك صلاحية رفض المرتجع'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        ret = self.get_object()
+        if ret.status not in ('pending', 'approved'):
+            return Response(
+                {'error': f'لا يمكن رفض مرتجع بحالة: {ret.status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        ret.status = 'rejected'
+        ret.save(update_fields=['status'])
+        return Response(self.get_serializer(ret).data)
+
+    @action(detail=False, methods=['get'])
     def stats(self, request):
-        """إحصائيات المرتجعات"""
-        from datetime import datetime, timedelta
-        from django.utils import timezone
-        
-        today = timezone.now().date()
-        week_ago = today - timedelta(days=7)
+        """إحصائيات المرتجعات — مع RBAC scope"""
+        today     = timezone.now().date()
+        week_ago  = today - timedelta(days=7)
         month_ago = today - timedelta(days=30)
-        
-        # Debug: عرض جميع المرتجعات
-        all_returns = Return.objects.all()
-        print(f"[DEBUG stats] Total returns in DB: {all_returns.count()}")
-        for r in all_returns[:5]:  # أول 5 مرتجعات
-            print(f"  - Return {r.id}: amount={r.total_amount}, status={r.status}, created_at={r.created_at}, cash_register={r.cash_register_id}")
-        
-        # إحصائيات اليوم
-        today_returns = Return.objects.filter(
-            created_at__date=today,
-            status='completed'
-        )
-        
-        print(f"[DEBUG stats] Today returns count: {today_returns.count()}")
-        
-        today_stats = today_returns.aggregate(
-            total=Sum('total_amount'),
-            count=Count('id')
-        )
-        
-        # إحصائيات الأسبوع
-        week_returns = Return.objects.filter(
-            created_at__date__gte=week_ago,
-            status='completed'
-        ).aggregate(
-            total=Sum('total_amount'),
-            count=Count('id')
-        )
-        
-        # إحصائيات الشهر
-        month_returns = Return.objects.filter(
-            created_at__date__gte=month_ago,
-            status='completed'
-        ).aggregate(
-            total=Sum('total_amount'),
-            count=Count('id')
-        )
-        
-        result = {
+
+        # ✅ إصلاح: استخدم get_queryset عشان يطبق الـ RBAC scope
+        base = self.get_queryset()
+
+        def agg(qs):
+            return qs.aggregate(
+                total=Sum('total_amount'),
+                count=Count('id')
+            )
+
+        today_stats = agg(base.filter(created_at__date=today,          status='completed'))
+        week_stats  = agg(base.filter(created_at__date__gte=week_ago,  status='completed'))
+        month_stats = agg(base.filter(created_at__date__gte=month_ago, status='completed'))
+
+        # إحصائيات المرتجعات قيد الانتظار
+        pending_stats = agg(base.filter(status='pending'))
+
+        return Response({
             'today': {
                 'amount': today_stats['total'] or 0,
-                'count': today_stats['count'] or 0
+                'count':  today_stats['count'] or 0,
             },
             'week': {
-                'amount': week_returns['total'] or 0,
-                'count': week_returns['count'] or 0
+                'amount': week_stats['total'] or 0,
+                'count':  week_stats['count'] or 0,
             },
             'month': {
-                'amount': month_returns['total'] or 0,
-                'count': month_returns['count'] or 0
-            }
-        }
-        
-        print(f"[DEBUG stats] Result: {result}")
-        
-        return Response(result)
+                'amount': month_stats['total'] or 0,
+                'count':  month_stats['count'] or 0,
+            },
+            'pending': {
+                'amount': pending_stats['total'] or 0,
+                'count':  pending_stats['count'] or 0,
+            },
+        })
