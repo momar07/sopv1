@@ -4,7 +4,7 @@
 
 ---
 
-## [2026-03-08 18:36] fix_serialayzer
+## [2026-03-08 18:45] fix_buttons_permisson
 
 
 
@@ -34,3 +34,7 @@
 - Fix-1: أزلنا تكرار StockAlert (3 → 1 loop) في sales/serializers.py
 - Fix-2: StockAdjustmentSerializer يحل/يُنشئ StockAlert بعد تعديل المخزون
 - Fix-3: PurchaseOrderItemSerializer أضاف حقل unit و unit_name
+
+## [2026-03-08 18:40] fix_ui_actions
+- أضفنا seed_ui_actions.py يُنشئ 12 UiAction للصفحات: Products, Inventory, Customers, Users, CashRegister
+- products.add/delete → MGMT | customers.add → SALE | users.* → ADMN | cashregister.* → SALE
