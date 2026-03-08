@@ -185,15 +185,11 @@ export const inventoryAPI = {
   getAdjustments:   (params) => api.get('/inventory/adjustments/', { params }),
   createAdjustment: (data)   => api.post('/inventory/adjustments/', data),
 
-  // Alerts — Ticket System
-  getAlerts:             (params)       => api.get('/inventory/alerts/', { params }),
-  getAlert:              (id)           => api.get(`/inventory/alerts/${id}/`),
-  getAlertsSummary:      (params)       => api.get('/inventory/alerts/summary/', { params }),
-  checkAndGenerateAlerts:(data)         => api.post('/inventory/alerts/check_and_generate/', data),
-  resolveAlert:          (id, data={}) => api.post(`/inventory/alerts/${id}/resolve/`, data),
-  addAlertNote:          (id, data)     => api.post(`/inventory/alerts/${id}/add_note/`, data),
-  createPoFromAlert:     (id, data)     => api.post(`/inventory/alerts/${id}/create_purchase_order/`, data),
-  updateAlertMeta:       (id, data)     => api.patch(`/inventory/alerts/${id}/update_meta/`, data),
+  // Alerts
+  getAlerts:             (params) => api.get('/inventory/alerts/', { params }),
+  getAlertsSummary:      (params) => api.get('/inventory/alerts/summary/', { params }),
+  checkAndGenerateAlerts:(data)   => api.post('/inventory/alerts/check_and_generate/', data),
+  resolveAlert:          (id)     => api.post(`/inventory/alerts/${id}/resolve/`),
 
   // Stock Movements
   getMovements:          (params) => api.get('/inventory/movements/', { params }),

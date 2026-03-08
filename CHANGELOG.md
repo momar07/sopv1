@@ -4,7 +4,7 @@
 
 ---
 
-## [2026-03-08 20:34] no_add_without_po
+## [2026-03-08 20:49] tiketing_add
 
 
 
@@ -120,3 +120,12 @@
   - Storekeepers (أمناء المخازن)
   - Cashiers (الكاشيرية)
   - أي role آخر
+
+## [2026-03-08] fix_03b_alert_ticket_frontend
+### التغييرات
+- **api.js**: أضيف getAlert, addAlertNote, createPoFromAlert, updateAlertMeta
+- **InventoryPage.jsx**:
+  - AlertCard: بطاقة تذكرة مع أولوية وحالة ومخزون وملاحظات
+  - AlertTicketModal: تذكرة كاملة مع timeline + فورم ملاحظة
+    + إنشاء PO + حل التذكرة
+  - AlertsPanel: شبكة بطاقات مع فلاتر وإحصائيات
