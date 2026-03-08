@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { inventoryAPI, productsAPI } from '../services/api';
-import { useAuth } from '../context/AuthContext';
 
 const fmt = (n) => Number(n || 0).toFixed(2);
 
@@ -450,13 +449,6 @@ function ReceiveModal({ order, onClose, onReceive }) {
 
 // Stock Adjustment
 function AdjustPanel() {
-  const { user }                = useAuth();
-  // ✅ أمين المخزن لا يقدر يزيد المخزون يدوياً
-  const userGroups              = user?.groups?.map(g => g.name) || [];
-  const canIncreaseStock        = user?.is_superuser ||
-                                  userGroups.includes('Admins') ||
-                                  userGroups.includes('Managers');
-
   const [adjustments, setAdj]   = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -518,26 +510,9 @@ function AdjustPanel() {
             </select>
           </Field>
           <Field label="الكمية (+ اضافة / - خصم) *">
-            <input
-              type="number"
-              className={INP}
-              placeholder={canIncreaseStock ? 'مثال: 10 او -5' : 'مثال: -5 (تخفيض فقط)'}
+            <input type="number" className={INP} placeholder="مثال: 10 او -5"
               value={form.quantity_change}
-              min={canIncreaseStock ? undefined : undefined}
-              onChange={e => {
-                const val = e.target.value;
-                // ✅ أمين المخزن: يُسمح بالقيم السالبة فقط
-                if (!canIncreaseStock && Number(val) > 0) return;
-                setForm({...form, quantity_change: val});
-              }}
-            />
-            {!canIncreaseStock && (
-              <p className="text-xs text-orange-600 mt-1 font-bold">
-                <i className="fas fa-lock ml-1"></i>
-                صلاحيتك تسمح بتخفيض المخزون فقط (تلف / فقد / جرد).
-                لزيادة المخزون أنشئ <strong>أمر شراء</strong>.
-              </p>
-            )}
+              onChange={e=>setForm({...form,quantity_change:e.target.value})} />
           </Field>
           <Field label="السبب">
             <select className={INP} value={form.reason}
@@ -550,27 +525,9 @@ function AdjustPanel() {
               onChange={e=>setForm({...form,notes:e.target.value})} />
           </Field>
         </div>
-        {/* ✅ تحذير لأمين المخزن */}
-        {!canIncreaseStock && (
-          <div className="mt-4 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 flex items-start gap-3">
-            <i className="fas fa-info-circle text-orange-500 mt-0.5 text-sm"></i>
-            <div>
-              <p className="text-sm font-bold text-orange-700">تسوية المخزون — صلاحية محدودة</p>
-              <p className="text-xs text-orange-600 mt-1">
-                يمكنك تسجيل <strong>تخفيض</strong> المخزون فقط (تلف / فقد / جرد دوري).<br/>
-                لزيادة المخزون اذهب إلى تبويب <strong>أوامر الشراء</strong> وأنشئ أمر شراء جديد.
-              </p>
-            </div>
-          </div>
-        )}
-        <button
-          onClick={handleSave}
-          disabled={saving || (!canIncreaseStock && Number(form.quantity_change) > 0)}
-          className={`mt-4 font-bold px-5 py-2 rounded-xl text-sm text-white transition
-            ${saving || (!canIncreaseStock && Number(form.quantity_change) > 0)
-              ? 'bg-gray-400 cursor-not-allowed'
-              : 'bg-blue-600 hover:bg-blue-700'}`}>
-          {saving ? '...' : 'تطبيق التسوية'}
+        <button onClick={handleSave} disabled={saving}
+          className="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2 rounded-xl text-sm">
+          {saving?'...':'تطبيق التسوية'}
         </button>
       </div>
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">

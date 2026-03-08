@@ -4,7 +4,7 @@
 
 ---
 
-## [2026-03-08 20:29] button_01default_product
+## [2026-03-08 20:34] no_add_without_po
 
 
 
@@ -94,3 +94,29 @@
 ### ملاحظة
 لم يتغيّر شيء في Backend لأن ProductSerializer يعامل stock كـ read_only
 بالفعل منذ البداية.
+
+## [2026-03-08] fix_02_restrict_stock_adjustment
+### المشكلة
+أمين المخزن كان يقدر يزيد المخزون يدوياً من تسوية المخزون
+بدون أي قيد، وده يكسر مبدأ أن زيادة المخزون تكون فقط عبر أمر شراء.
+
+### التغييرات
+- **inventory/views.py** — StockAdjustmentViewSet.perform_create:
+  يرفع PermissionDenied إذا كان quantity_change > 0
+  والمستخدم ليس في Admins أو Managers أو superuser.
+
+- **InventoryPage.jsx** — AdjustPanel:
+  - يقرأ groups المستخدم من AuthContext.
+  - يمنع إدخال قيم موجبة في حقل الكمية لأمين المخزن.
+  - يُعطّل زر "تطبيق التسوية" إذا كانت الكمية موجبة وغير مصرح.
+  - يعرض رسالة توضيحية برتقالية توجّه لاستخدام أوامر الشراء.
+
+### الأدوار المسموح لها بزيادة المخزون يدوياً
+  - Superuser
+  - Admins
+  - Managers
+
+### الأدوار المقيّدة (تخفيض فقط)
+  - Storekeepers (أمناء المخازن)
+  - Cashiers (الكاشيرية)
+  - أي role آخر

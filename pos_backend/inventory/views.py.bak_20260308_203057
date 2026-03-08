@@ -149,23 +149,7 @@ class StockAdjustmentViewSet(viewsets.ModelViewSet):
     http_method_names  = ['get', 'post', 'head', 'options']
 
     def perform_create(self, serializer):
-        user   = self.request.user
-        change = serializer.validated_data.get('quantity_change', 0)
-
-        # ✅ أمين المخزن لا يقدر يزيد المخزون يدوياً
-        if change > 0:
-            allowed_groups = {'Admins', 'Managers'}
-            user_groups    = set(user.groups.values_list('name', flat=True))
-            is_allowed     = user.is_superuser or bool(allowed_groups & user_groups)
-
-            if not is_allowed:
-                from rest_framework.exceptions import PermissionDenied
-                raise PermissionDenied(
-                    'غير مصرح: لا يمكن زيادة المخزون يدوياً. '
-                    'يجب إنشاء أمر شراء واستلامه لزيادة الكمية.'
-                )
-
-        serializer.save(user=user)
+        serializer.save(user=self.request.user)
 
 
 # ── StockAlert ────────────────────────────────────────────
