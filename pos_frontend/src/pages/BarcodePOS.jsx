@@ -714,6 +714,12 @@ const syncPendingSales = useCallback(async () => {
     // ✅ هنا — قبل أي حاجة
     const closedTabId = activeTabId;
 
+    // ✅ FIX-1: الغاء اي debounce timer معلق لمنع كتابة stale state
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+
     const subtotal = getSubtotal();
     const discountAmount = (subtotal * Number(discount || 0)) / 100;
     const taxAmount = ((subtotal - discountAmount) * Number(tax || 0)) / 100;
@@ -754,17 +760,29 @@ const syncPendingSales = useCallback(async () => {
 
       closeOrResetAfterSale(closedTabId);
 
+      // ✅ FIX-2: كتابة cleanState فورا لمنع stale closure من الكتابة لاحقا
       try {
-        const st = JSON.parse(localStorage.getItem(POS_STATE_KEY) || '{}');
-        if (st?.tabs) {
-          if (st.tabs.length > 1) {
-            st.tabs = st.tabs.filter((t) => t.id !== closedTabId);
-            st.activeTabId = st.tabs[st.tabs.length - 1]?.id;
-          } else {
-            st.tabs = st.tabs.map((t) => ({ ...t, cart: [] }));
-          }
-          localStorage.setItem(POS_STATE_KEY, JSON.stringify(st));
+        const st       = JSON.parse(localStorage.getItem(POS_STATE_KEY) || '{}');
+        let cleanTabs   = Array.isArray(st?.tabs) ? st.tabs : [];
+        let cleanActive = st?.activeTabId;
+
+        if (cleanTabs.length > 1) {
+          cleanTabs   = cleanTabs.filter((t) => t.id !== closedTabId);
+          cleanActive = cleanTabs[cleanTabs.length - 1]?.id;
+        } else {
+          cleanTabs = cleanTabs.map((t) => ({ ...t, cart: [] }));
         }
+
+        localStorage.setItem(POS_STATE_KEY, JSON.stringify({
+          tabs:          cleanTabs,
+          activeTabId:   cleanActive,
+          discount:      0,
+          tax:           0,
+          paymentMethod: 'cash',
+          paidAmount:    '',
+          note:          '',
+          savedAt:       Date.now(),
+        }));
       } catch {}
 
       if (lockScanner) setTimeout(() => barcodeRef.current?.focus?.(), 80);
@@ -780,6 +798,31 @@ const syncPendingSales = useCallback(async () => {
       setPaidAmount('');
       setNote('');
       closeOrResetAfterSale(closedTabId);
+
+      // ✅ FIX-3: كتابة cleanState فورا (offline path)
+      try {
+        const st       = JSON.parse(localStorage.getItem(POS_STATE_KEY) || '{}');
+        let cleanTabs   = Array.isArray(st?.tabs) ? st.tabs : [];
+        let cleanActive = st?.activeTabId;
+
+        if (cleanTabs.length > 1) {
+          cleanTabs   = cleanTabs.filter((t) => t.id !== closedTabId);
+          cleanActive = cleanTabs[cleanTabs.length - 1]?.id;
+        } else {
+          cleanTabs = cleanTabs.map((t) => ({ ...t, cart: [] }));
+        }
+
+        localStorage.setItem(POS_STATE_KEY, JSON.stringify({
+          tabs:          cleanTabs,
+          activeTabId:   cleanActive,
+          discount:      0,
+          tax:           0,
+          paymentMethod: 'cash',
+          paidAmount:    '',
+          note:          '',
+          savedAt:       Date.now(),
+        }));
+      } catch {}
 
       if (lockScanner) setTimeout(() => barcodeRef.current?.focus?.(), 80);
     }
