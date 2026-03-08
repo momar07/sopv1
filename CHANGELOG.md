@@ -4,6 +4,13 @@
 
 ---
 
+## [2026-03-08 17:29] UOM REBULD
+
+
+
+
+## [2026-03-08 17:25] تحديث inventory/views.py: receive يحسب actual_qty = qty x unit.factor
+## [2026-03-08 17:24] إعادة بناء النظام مع UoM المرن + منع تعديل stock مباشرة
 ## [2026-03-08 14:55] fix bugs
 
 

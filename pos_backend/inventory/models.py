@@ -4,15 +4,15 @@ from django.conf import settings
 
 
 class Supplier(models.Model):
-    id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name         = models.CharField(max_length=200, verbose_name='اسم المورد')
-    phone        = models.CharField(max_length=20,  blank=True, default='')
-    email        = models.EmailField(blank=True, default='')
-    address      = models.TextField(blank=True, default='')
-    notes        = models.TextField(blank=True, default='')
-    is_active    = models.BooleanField(default=True)
-    created_at   = models.DateTimeField(auto_now_add=True)
-    updated_at   = models.DateTimeField(auto_now=True)
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name       = models.CharField(max_length=200, verbose_name='اسم المورد')
+    phone      = models.CharField(max_length=20,  blank=True, default='')
+    email      = models.EmailField(blank=True, default='')
+    address    = models.TextField(blank=True, default='')
+    notes      = models.TextField(blank=True, default='')
+    is_active  = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name        = 'مورد'
@@ -32,10 +32,14 @@ class PurchaseOrder(models.Model):
     ]
     id               = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     reference_number = models.CharField(max_length=50, unique=True)
-    supplier         = models.ForeignKey(Supplier, null=True, blank=True,
-                           on_delete=models.SET_NULL, related_name='orders')
-    user             = models.ForeignKey(settings.AUTH_USER_MODEL,
-                           null=True, on_delete=models.SET_NULL, related_name='purchase_orders')
+    supplier         = models.ForeignKey(
+        Supplier, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='orders'
+    )
+    user             = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True,
+        on_delete=models.SET_NULL, related_name='purchase_orders'
+    )
     status           = models.CharField(max_length=20, choices=STATUS, default='draft')
     total_cost       = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     notes            = models.TextField(blank=True, default='')
@@ -59,23 +63,45 @@ class PurchaseOrder(models.Model):
 
 
 class PurchaseOrderItem(models.Model):
-    id               = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    order            = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='items')
-    product          = models.ForeignKey('products.Product', on_delete=models.CASCADE)
-    quantity         = models.PositiveIntegerField(default=1)
-    received_quantity= models.PositiveIntegerField(default=0)
-    unit_cost        = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    id                = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order             = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='items')
+    product           = models.ForeignKey('products.Product', on_delete=models.CASCADE)
+    unit              = models.ForeignKey(
+        'products.UnitOfMeasure', on_delete=models.PROTECT,
+        null=True, blank=True,
+        verbose_name='وحدة الاستلام'
+    )
+    quantity          = models.PositiveIntegerField(default=1, verbose_name='الكمية بالوحدة')
+    received_quantity = models.PositiveIntegerField(default=0)
+    unit_cost         = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     @property
-    def subtotal(self):
-        return self.unit_cost * self.quantity
+    def factor(self):
+        """معامل تحويل الوحدة"""
+        if self.unit and self.unit.factor:
+            return float(self.unit.factor)
+        return 1.0
+
+    @property
+    def actual_quantity(self):
+        """الكمية الفعلية بالوحدة الأساسية"""
+        return int(self.quantity * self.factor)
+
+    @property
+    def actual_received(self):
+        return int(self.received_quantity * self.factor)
 
     @property
     def remaining_quantity(self):
         return max(0, self.quantity - self.received_quantity)
 
+    @property
+    def subtotal(self):
+        return self.unit_cost * self.quantity
+
     def __str__(self):
-        return f"{self.product.name} x{self.quantity}"
+        unit_name = self.unit.name if self.unit else 'قطعة'
+        return self.product.name + ' x' + str(self.quantity) + ' ' + unit_name
 
 
 class StockAdjustment(models.Model):
@@ -103,7 +129,7 @@ class StockAdjustment(models.Model):
         ordering            = ['-created_at']
 
     def __str__(self):
-        return f"{self.product.name}: {self.quantity_change:+d}"
+        return self.product.name + ': ' + ('+' if self.quantity_change >= 0 else '') + str(self.quantity_change)
 
 
 class StockAlert(models.Model):
@@ -127,11 +153,10 @@ class StockAlert(models.Model):
         ordering            = ['-created_at']
 
     def __str__(self):
-        return f"{self.product.name} - {self.alert_type}"
+        return self.product.name + ' - ' + self.alert_type
 
 
 class StockMovement(models.Model):
-    # سجل كل حركة مخزون
     MOVEMENT_TYPES = [
         ('sale',       'بيع'),
         ('purchase',   'شراء'),
@@ -140,17 +165,26 @@ class StockMovement(models.Model):
         ('initial',    'رصيد افتتاحي'),
     ]
     id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    product       = models.ForeignKey('products.Product', on_delete=models.CASCADE,
-                       related_name='movements')
+    product       = models.ForeignKey('products.Product', on_delete=models.CASCADE, related_name='movements')
     movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES)
-    quantity      = models.IntegerField()
+    quantity      = models.IntegerField(verbose_name='الكمية بالوحدة الأساسية')
     stock_before  = models.IntegerField(default=0)
     stock_after   = models.IntegerField(default=0)
-    reference     = models.CharField(max_length=200, blank=True, default='',
-                       help_text='رقم الفاتورة او امر الشراء')
+    unit          = models.ForeignKey(
+        'products.UnitOfMeasure', on_delete=models.SET_NULL,
+        null=True, blank=True,
+        verbose_name='الوحدة المستخدمة'
+    )
+    unit_quantity = models.DecimalField(
+        max_digits=10, decimal_places=4,
+        null=True, blank=True,
+        verbose_name='الكمية بالوحدة المستخدمة'
+    )
+    reference     = models.CharField(max_length=200, blank=True, default='')
     notes         = models.TextField(blank=True, default='')
-    user          = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
-                       on_delete=models.SET_NULL)
+    user          = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+    )
     created_at    = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -159,4 +193,5 @@ class StockMovement(models.Model):
         ordering            = ['-created_at']
 
     def __str__(self):
-        return f"{self.product.name} {self.movement_type} {self.quantity:+d}"
+        sign = '+' if self.quantity >= 0 else ''
+        return self.product.name + ' ' + self.movement_type + ' ' + sign + str(self.quantity)

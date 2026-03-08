@@ -4,8 +4,12 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import F
-from .models import Supplier, PurchaseOrder, StockAdjustment, StockAlert, StockMovement
+from .models import (
+    Supplier, PurchaseOrder,
+    StockAdjustment, StockAlert, StockMovement,
+)
 from .serializers import (
     SupplierSerializer, PurchaseOrderSerializer,
     StockAdjustmentSerializer, StockAlertSerializer, StockMovementSerializer,
@@ -13,6 +17,7 @@ from .serializers import (
 from products.models import Product
 
 
+# ── Supplier ──────────────────────────────────────────────
 class SupplierViewSet(viewsets.ModelViewSet):
     queryset           = Supplier.objects.all()
     serializer_class   = SupplierSerializer
@@ -22,8 +27,11 @@ class SupplierViewSet(viewsets.ModelViewSet):
     ordering           = ['name']
 
 
+# ── PurchaseOrder ─────────────────────────────────────────
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
-    queryset = PurchaseOrder.objects.select_related('supplier','user').prefetch_related('items__product').all()
+    queryset = PurchaseOrder.objects.select_related(
+        'supplier', 'user'
+    ).prefetch_related('items__product', 'items__unit').all()
     serializer_class   = PurchaseOrderSerializer
     permission_classes = [IsAuthenticated]
     filter_backends    = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -37,47 +45,79 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def receive(self, request, pk=None):
         order = self.get_object()
+
         if order.status == 'cancelled':
-            return Response({'error': 'لا يمكن استلام امر ملغي'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': 'لا يمكن استلام امر ملغي'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         if order.status == 'received':
-            return Response({'error': 'تم استلام هذا الامر مسبقا'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': 'تم استلام هذا الامر مسبقا'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         received_quantities = request.data.get('received_quantities', {})
-        from django.db import transaction
+
         with transaction.atomic():
-            for item in order.items.select_related('product').all():
+            for item in order.items.select_related('product', 'unit').all():
                 qty = received_quantities.get(str(item.id), item.remaining_quantity)
                 qty = max(0, int(qty))
-                if qty > 0:
-                    product = item.product
-                    stock_before = product.stock
-                    Product.objects.filter(id=product.id).update(
-                        stock=F('stock') + qty,
-                        cost=item.unit_cost
-                    )
-                    product.refresh_from_db()
-                    stock_after = product.stock
-                    item.received_quantity = item.received_quantity + qty
-                    item.save(update_fields=['received_quantity'])
-                    StockAdjustment.objects.create(
-                        product         = product,
-                        user            = request.user,
-                        quantity_before = stock_before,
-                        quantity_change = qty,
-                        quantity_after  = stock_after,
-                        reason          = 'other',
-                        notes           = f"استلام من امر شراء #{order.reference_number}"
-                    )
-                    StockMovement.objects.create(
-                        product       = product,
-                        movement_type = 'purchase',
-                        quantity      = qty,
-                        stock_before  = stock_before,
-                        stock_after   = stock_after,
-                        reference     = order.reference_number,
-                        user          = request.user,
-                        notes         = f"استلام امر شراء #{order.reference_number}"
-                    )
+
+                if qty == 0:
+                    continue
+
+                product = item.product
+
+                # ✅ UoM: actual_qty = qty × unit.factor
+                unit       = item.unit
+                factor     = float(unit.factor) if unit and unit.factor else 1.0
+                actual_qty = int(qty * factor)
+
+                stock_before = product.stock
+
+                Product.objects.filter(id=product.id).update(
+                    stock=F('stock') + actual_qty,
+                    cost=item.unit_cost,
+                )
+                product.refresh_from_db()
+                stock_after = product.stock
+
+                item.received_quantity += qty
+                item.save(update_fields=['received_quantity'])
+
+                # تسوية مخزون
+                StockAdjustment.objects.create(
+                    product         = product,
+                    user            = request.user,
+                    quantity_before = stock_before,
+                    quantity_change = actual_qty,
+                    quantity_after  = stock_after,
+                    reason          = 'other',
+                    notes           = 'استلام امر شراء #' + order.reference_number,
+                )
+
+                # حركة مخزون
+                StockMovement.objects.create(
+                    product       = product,
+                    movement_type = 'purchase',
+                    quantity      = actual_qty,
+                    stock_before  = stock_before,
+                    stock_after   = stock_after,
+                    unit          = unit,
+                    unit_quantity = qty,
+                    reference     = order.reference_number,
+                    user          = request.user,
+                    notes         = 'استلام امر شراء #' + order.reference_number,
+                )
+
+                # ✅ resolve StockAlert لو المخزون رجع فوق الـ threshold
+                from inventory.models import StockAlert as _SA
+                if product.stock > 0:
+                    _SA.objects.filter(
+                        product=product, is_resolved=False
+                    ).update(is_resolved=True, resolved_at=timezone.now())
+
             order.status      = 'received'
             order.received_at = timezone.now()
             order.save(update_fields=['status', 'received_at'])
@@ -88,14 +128,18 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     def cancel(self, request, pk=None):
         order = self.get_object()
         if order.status == 'received':
-            return Response({'error': 'لا يمكن الغاء امر تم استلامه'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': 'لا يمكن الغاء امر تم استلامه'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         order.status = 'cancelled'
         order.save(update_fields=['status'])
         return Response(self.get_serializer(order).data)
 
 
+# ── StockAdjustment ───────────────────────────────────────
 class StockAdjustmentViewSet(viewsets.ModelViewSet):
-    queryset           = StockAdjustment.objects.select_related('product','user').all()
+    queryset           = StockAdjustment.objects.select_related('product', 'user').all()
     serializer_class   = StockAdjustmentSerializer
     permission_classes = [IsAuthenticated]
     filter_backends    = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -108,6 +152,7 @@ class StockAdjustmentViewSet(viewsets.ModelViewSet):
         serializer.save(user=self.request.user)
 
 
+# ── StockAlert ────────────────────────────────────────────
 class StockAlertViewSet(viewsets.ModelViewSet):
     queryset           = StockAlert.objects.select_related('product').all()
     serializer_class   = StockAlertSerializer
@@ -126,14 +171,21 @@ class StockAlertViewSet(viewsets.ModelViewSet):
             if StockAlert.objects.filter(product=product, is_resolved=False).exists():
                 continue
             if product.stock == 0:
-                StockAlert.objects.create(product=product, alert_type='out',
-                    threshold=threshold, current_stock=0)
+                StockAlert.objects.create(
+                    product=product, alert_type='out',
+                    threshold=threshold, current_stock=0
+                )
                 created += 1
             elif product.stock <= threshold:
-                StockAlert.objects.create(product=product, alert_type='low',
-                    threshold=threshold, current_stock=product.stock)
+                StockAlert.objects.create(
+                    product=product, alert_type='low',
+                    threshold=threshold, current_stock=product.stock
+                )
                 created += 1
-        return Response({'created_alerts': created, 'checked_products': products.count()})
+        return Response({
+            'created_alerts':    created,
+            'checked_products':  products.count(),
+        })
 
     @action(detail=True, methods=['post'])
     def resolve(self, request, pk=None):
@@ -148,7 +200,9 @@ class StockAlertViewSet(viewsets.ModelViewSet):
         threshold      = int(request.query_params.get('threshold', 10))
         total_products = Product.objects.filter(is_active=True).count()
         out_of_stock   = Product.objects.filter(is_active=True, stock=0).count()
-        low_stock      = Product.objects.filter(is_active=True, stock__gt=0, stock__lte=threshold).count()
+        low_stock      = Product.objects.filter(
+            is_active=True, stock__gt=0, stock__lte=threshold
+        ).count()
         unresolved     = StockAlert.objects.filter(is_resolved=False).count()
         return Response({
             'total_products':    total_products,
@@ -159,8 +213,9 @@ class StockAlertViewSet(viewsets.ModelViewSet):
         })
 
 
+# ── StockMovement (read-only) ──────────────────────────────
 class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset           = StockMovement.objects.select_related('product','user').all()
+    queryset           = StockMovement.objects.select_related('product', 'user', 'unit').all()
     serializer_class   = StockMovementSerializer
     permission_classes = [IsAuthenticated]
     filter_backends    = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
