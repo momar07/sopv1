@@ -4,6 +4,8 @@
 
 ---
 
-## [2026-03-08 11:49] inventory improvments
+## [2026-03-08 13:24] Financial added
 
+
+## [2026-03-08 12:52] إضافة صفحة التقرير المالي الشامل (FinancialReport)
 

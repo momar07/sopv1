@@ -3,7 +3,8 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { lazyPage } from '../ui/componentLoader';
 import { useAuth } from '../context/AuthContext';
 
-const ReturnsPage = lazy(() => import('../pages/ReturnsPage'));
+const ReturnsPage      = lazy(() => import('../pages/ReturnsPage'));
+const FinancialReport  = lazy(() => import('../pages/FinancialReport'));
 
 const Fallback = () => (
   <div className="flex items-center justify-center h-[60vh]">
@@ -19,23 +20,21 @@ export default function DynamicRoutes({ ProtectedRoute, POSProtectedRoute }) {
   return (
     <Suspense fallback={<Fallback />}>
       <Routes>
-        {/* مسار ثابت للمرتجعات — مش محتاج يكون في الـ DB */}
-        <Route
-          path="/returns"
-          element={
-            <ProtectedRoute>
-              <ReturnsPage />
-            </ProtectedRoute>
-          }
-        />
 
+        {/* مسارات ثابتة */}
+        <Route path="/returns" element={
+          <ProtectedRoute><ReturnsPage /></ProtectedRoute>
+        } />
+        <Route path="/financial-report" element={
+          <ProtectedRoute><FinancialReport /></ProtectedRoute>
+        } />
+
+        {/* مسارات ديناميكية من الـ DB */}
         {routes.map((r) => {
           const Page = lazyPage(r.component);
           const element = (() => {
-            if (r.wrapper === 'public') return <Page />;
-            if (r.wrapper === 'pos_shift') return (
-              <POSProtectedRoute><Page /></POSProtectedRoute>
-            );
+            if (r.wrapper === 'public')    return <Page />;
+            if (r.wrapper === 'pos_shift') return <POSProtectedRoute><Page /></POSProtectedRoute>;
             return <ProtectedRoute><Page /></ProtectedRoute>;
           })();
           return <Route key={r.key || r.path} path={r.path} element={element} />;
