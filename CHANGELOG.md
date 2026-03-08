@@ -4,7 +4,7 @@
 
 ---
 
-## [2026-03-08 18:45] fix_buttons_permisson
+## [2026-03-08 19:08] fix_unit_product
 
 
 
@@ -38,3 +38,19 @@
 ## [2026-03-08 18:40] fix_ui_actions
 - أضفنا seed_ui_actions.py يُنشئ 12 UiAction للصفحات: Products, Inventory, Customers, Users, CashRegister
 - products.add/delete → MGMT | customers.add → SALE | users.* → ADMN | cashregister.* → SALE
+
+## [2026-03-08 18:51] fix_add_categories_page
+- أضفنا Categories.jsx: إدارة كاملة للتصنيفات مع color picker وicon picker
+- أضفنا test_uom.py: اختبار شامل (7 مجموعات) للـ UnitOfMeasure model + API
+- أضفنا seed_ui_categories.py: route + menuItem + actions للتصنيفات
+- CATEGORY_SERIALIZER_PATCH.txt: إضافة products_count للـ CategorySerializer
+
+## [2026-03-08 19:05] fix_test_uom
+- Fix: endpoint /api/products/units/ → /api/units/
+- Fix: guard isinstance(items, list) قبل list comprehension
+- أضفنا اختبارات إضافية: PATCH, auth, search filter, profit_margin, is_low_stock
+
+## [2026-03-08 19:06] fix_test_uom
+- Fix: endpoint /api/products/units/ → /api/units/
+- Fix: guard isinstance(items, list) قبل list comprehension
+- أضفنا اختبارات إضافية: PATCH, auth, search filter, profit_margin, is_low_stock

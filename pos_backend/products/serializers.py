@@ -19,9 +19,14 @@ class ProductUnitPriceSerializer(serializers.ModelSerializer):
 
 
 class CategorySerializer(serializers.ModelSerializer):
+    products_count = serializers.SerializerMethodField()
+
     class Meta:
         model  = Category
-        fields = ['id', 'name', 'icon', 'color', 'created_at']
+        fields = ['id', 'name', 'icon', 'color', 'created_at', 'products_count']
+
+    def get_products_count(self, obj):
+        return obj.products.count()
 
 
 class ProductSerializer(serializers.ModelSerializer):
