@@ -65,7 +65,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         quantity_before = stock_before,
                         quantity_change = qty,
                         quantity_after  = stock_after,
-                        reason          = 'count',
+                        reason          = 'other',
                         notes           = f"استلام من امر شراء #{order.reference_number}"
                     )
                     StockMovement.objects.create(

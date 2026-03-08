@@ -185,13 +185,38 @@ class SaleViewSet(viewsets.ModelViewSet):
                     )
 
             # تحديث بيانات العميل
-            if sale.customer:
-                sale.customer.total_purchases -= sale.total
-                sale.customer.points = max(0, sale.customer.points - int(sale.total))
-                sale.customer.save()
+            # ✅ Fix-4: StockAdjustment عند الغاء البيع
+            from inventory.models import StockAdjustment as _SA
+            _SA.objects.create(
+                product=product,
+                user=user,
+                quantity_before=stock_before,
+                quantity_change=item.quantity,
+                quantity_after=stock_after,
+                reason='other',
+                notes='cancel #' + (sale.invoice_number or str(sale.id)[:8]),
+            )
 
-            sale.status = 'cancelled'
-            sale.save()
+        # ✅ Fix-2: resolve StockAlerts بعد الغاء البيع
+        from inventory.models import StockAlert as _SAlt
+        from django.utils import timezone as _tz
+        _THR = 10
+        for _ci in sale.items.select_related('product').all():
+            if not _ci.product:
+                continue
+            _ci.product.refresh_from_db()
+            if _ci.product.stock > _THR:
+                _SAlt.objects.filter(
+                    product=_ci.product, is_resolved=False
+                ).update(is_resolved=True, resolved_at=_tz.now())
+
+        if sale.customer:
+            sale.customer.total_purchases -= sale.total
+            sale.customer.points = max(0, sale.customer.points - int(sale.total))
+            sale.customer.save()
+
+        sale.status = 'cancelled'
+        sale.save()
 
         serializer = self.get_serializer(sale)
         return Response(serializer.data)

@@ -139,6 +139,76 @@ class SaleSerializer(serializers.ModelSerializer):
                 **item_data
             )
 
+        # ✅ Fix-1: StockAlert تلقائي بعد البيع
+        from inventory.models import StockAlert
+        ALERT_THRESHOLD = 10
+        for item_obj in sale.items.select_related('product').all():
+            prod = item_obj.product
+            if not prod:
+                continue
+            prod.refresh_from_db()
+            # تجاهل لو فيه alert غير محلول للمنتج ده
+            if StockAlert.objects.filter(product=prod, is_resolved=False).exists():
+                continue
+            if prod.stock == 0:
+                StockAlert.objects.create(
+                    product=prod,
+                    alert_type='out',
+                    threshold=ALERT_THRESHOLD,
+                    current_stock=0,
+                )
+            elif prod.stock <= ALERT_THRESHOLD:
+                StockAlert.objects.create(
+                    product=prod,
+                    alert_type='low',
+                    threshold=ALERT_THRESHOLD,
+                    current_stock=prod.stock,
+                )
+
+        # ✅ Fix-1: StockAlert تلقائي بعد البيع
+        from inventory.models import StockAlert
+        ALERT_THRESHOLD = 10
+        for _item in sale.items.select_related('product').all():
+            _prod = _item.product
+            if not _prod:
+                continue
+            _prod.refresh_from_db()
+            if StockAlert.objects.filter(product=_prod, is_resolved=False).exists():
+                continue
+            if _prod.stock == 0:
+                StockAlert.objects.create(
+                    product=_prod,
+                    alert_type='out',
+                    threshold=ALERT_THRESHOLD,
+                    current_stock=0,
+                )
+            elif _prod.stock <= ALERT_THRESHOLD:
+                StockAlert.objects.create(
+                    product=_prod,
+                    alert_type='low',
+                    threshold=ALERT_THRESHOLD,
+                    current_stock=_prod.stock,
+                )
+
+        # ✅ Fix-1: StockAlert تلقائي بعد البيع
+        from inventory.models import StockAlert
+        _THRESHOLD = 10
+        for _si in sale.items.select_related('product').all():
+            _p = _si.product
+            if not _p:
+                continue
+            _p.refresh_from_db()
+            if StockAlert.objects.filter(product=_p, is_resolved=False).exists():
+                continue
+            if _p.stock == 0:
+                StockAlert.objects.create(
+                    product=_p, alert_type='out',
+                    threshold=_THRESHOLD, current_stock=0)
+            elif _p.stock <= _THRESHOLD:
+                StockAlert.objects.create(
+                    product=_p, alert_type='low',
+                    threshold=_THRESHOLD, current_stock=_p.stock)
+
         # تحديث بيانات العميل
         if sale.customer and sale.status == 'completed':
             sale.customer.total_purchases += sale.total

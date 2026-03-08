@@ -1,58 +1,32 @@
-# Fix: BarcodePOS - paidAmount / Cart State Persistence Bug
+# Fix: Inventory Flow — 5 Issues Fixed
 
 ## Date
-2026-03-08 13:44
+2026-03-08 14:36
 
-## المشكلة
-بعد اتمام عملية البيع في BarcodePOS.jsx، عند الانتقال لصفحة اخرى والرجوع
-يظهر الـ paidAmount القديم واحيانا تعود السلة كما كانت.
+## النقاط المصلحة
 
-## السبب الجذري
-الـ component يستخدم debounce بـ 5 ثواني (scheduleSave) يستدعي
-saveStateNow() بعد كل تغيير في الـ state. عند تنفيذ finalizeSale():
+### Fix-1: StockAlert تلقائي بعد البيع (serializers.py)
+بعد كل بيع: stock==0 → alert out | stock<=10 → alert low
 
-1. يتم reset الـ state في React (setPaidAmount(''), setDiscount(0) ...)
-2. لكن saveStateNow محجوز في closure قديم لا يزال يحمل القيم القديمة
-3. بعد 5 ثواني من البيع يكتب هذا الـ closure القيم القديمة في localStorage
+### Fix-2: resolve alerts بعد الغاء البيع (views.py)
+لو المخزون رجع فوق الـ threshold بعد الالغاء → resolve تلقائي
 
-## الاصلاح المطبق
+### Fix-3: reason='count' → reason='other' في receive (inventory/views.py)
+'purchase' مش موجود في REASONS choices فتم تغييره لـ 'other'
 
-### Fix 1 - الغاء الـ timer فورا عند بدء finalizeSale
-```js
-if (saveTimer.current) {
-  clearTimeout(saveTimer.current);
-  saveTimer.current = null;
-}
-```
+### Fix-4: StockAdjustment في cancel action (views.py)
+الغاء الفاتورة دلوقتي بيسجل StockAdjustment + StockMovement
 
-### Fix 2 - كتابة state نظيف في localStorage فورا (success path)
-```js
-localStorage.setItem(POS_STATE_KEY, JSON.stringify({
-  tabs:          cleanTabs,
-  activeTabId:   cleanActive,
-  discount:      0,
-  tax:           0,
-  paymentMethod: 'cash',
-  paidAmount:    '',
-  note:          '',
-  savedAt:       Date.now(),
-}));
-```
-
-### Fix 3 - نفس الاصلاح في الـ offline (catch) path
+### Fix-5: initial StockMovement عند اضافة منتج (products/views.py)
+stock > 0 عند الاضافة → StockMovement type='initial'
 
 ## الملفات المعدلة
-| الملف | التغيير |
-|-------|---------|
-| pos_frontend/src/pages/BarcodePOS.jsx | اضافة clearTimeout + كتابة cleanState فورا |
-| CHANGELOG.md | تحديث تلقائي |
-| FIXES_README.md | هذا الملف |
+| الملف | Fix |
+|-------|-----|
+| pos_backend/sales/serializers.py | Fix-1 |
+| pos_backend/sales/views.py       | Fix-2 + Fix-4 |
+| pos_backend/inventory/views.py   | Fix-3 |
+| pos_backend/products/views.py    | Fix-5 |
 
-## كيف تتحقق من الاصلاح
-1. اضف منتجات واكتب مبلغ مدفوع
-2. اضغط بيع
-3. انتقل لصفحة اخرى ثم ارجع
-4. السلة والـ paidAmount فارغين تماما
-
-## لا تحتاج migrations او اعادة تشغيل backend
-فقط: cd pos_frontend && npm run dev
+## ملاحظة: لا تحتاج migrations
+python manage.py runserver
