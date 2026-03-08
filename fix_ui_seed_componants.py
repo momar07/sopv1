@@ -1,10 +1,93 @@
-# seed_ui_data.py
+#!/usr/bin/env python3
+# =============================================================================
+#  fix_ui_components.py  ·  إصلاح component names في الـ seed
+#  يكتب seed_ui_data.py جديد بأسماء متطابقة مع src/pages/ الفعلية
+# =============================================================================
+
+import os, sys, shutil
+from datetime import datetime
+
+# ── مسارات ───────────────────────────────────────────────────────────────────
+BASE      = "/home/momar/Projects/POS_DEV/posv1_dev10"
+BACKEND   = os.path.join(BASE, "pos_backend")
+SEED_FILE = os.path.join(BACKEND, "seed_ui_data.py")
+SHELL_FILE= os.path.join(BASE,    "run_seed_ui.sh")
+CHANGELOG = os.path.join(BASE,    "CHANGELOG.md")
+README    = os.path.join(BASE,    "FIXES_README.md")
+
+SCRIPT_NAME = "fix_ui_components.py"
+NOW         = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+def abort(msg):
+    print(f"\n❌  {msg}")
+    sys.exit(1)
+
+def backup(path):
+    if os.path.exists(path):
+        shutil.copy2(path, path + ".bak")
+        print(f"   📦  backup → {os.path.basename(path)}.bak")
+
+def write_file(path, content):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"   ✅  written → {os.path.relpath(path, BASE)}")
+
+def update_changelog(msg):
+    entry = f"\n## [{NOW}] - {SCRIPT_NAME}\n- {msg}\n"
+    mode = "a" if os.path.exists(CHANGELOG) else "w"
+    with open(CHANGELOG, mode, encoding="utf-8") as f:
+        f.write(entry)
+
+def write_readme():
+    lines = [
+        "# FIXES README",
+        f"**Script:** `{SCRIPT_NAME}`",
+        f"**Date:** {NOW}",
+        "",
+        "---",
+        "## Component Names Audit",
+        "",
+        "### المشكلة",
+        "الـ seed القديم كان بيستخدم XxxPage (مثل DashboardPage, ProductsPage)",
+        "لكن الملفات الفعلية في src/pages/ بدون Page suffix.",
+        "ده بيخلي lazyPage() يـ throw error على كل route.",
+        "",
+        "### الـ Mapping الصح",
+        "| component في الـ DB | الملف الفعلي         |",
+        "|---------------------|----------------------|",
+        "| Dashboard           | Dashboard.jsx        |",
+        "| Products            | Products.jsx         |",
+        "| Customers           | Customers.jsx        |",
+        "| Operations          | Operations.jsx       |",
+        "| BarcodePOS          | BarcodePOS.jsx       |",
+        "| InventoryPage       | InventoryPage.jsx    |",
+        "| FinancialReport     | FinancialReport.jsx  |",
+        "| CashRegister        | CashRegister.jsx     |",
+        "| UserManagement      | UserManagement.jsx   |",
+        "| Settings            | Settings.jsx         |",
+        "| ReturnsPage         | ReturnsPage.jsx      |",
+        "| OperationDetails    | OperationDetails.jsx |",
+        "",
+        "### ملفات غير موجودة (محذوفة من الـ seed)",
+        "- PurchaseOrdersPage → الصفحة مش موجودة",
+        "- SuppliersPage → الصفحة مش موجودة",
+        "- UnitsPage → الصفحة مش موجودة",
+        "",
+        "### ملف معدّل",
+        "- pos_backend/seed_ui_data.py",
+    ]
+    write_file(README, "\n".join(lines))
+
+# ── seed_ui_data.py الجديد ───────────────────────────────────────────────────
+SEED_CONTENT = r"""# seed_ui_data.py
 # يُشغَّل داخل Django shell:
 #   cd pos_backend && python manage.py shell < seed_ui_data.py
 #
 # ======================================================
 #  Component names مطابقة لـ src/pages/ الفعلية
-#  (تم التحقق بتاريخ: 2026-03-08 18:21:09)
+#  (تم التحقق بتاريخ: """ + NOW + r""")
 # ======================================================
 
 import os
@@ -134,3 +217,56 @@ print("\n  seed done!")
 print("  restart backend  →  GET /api/auth/me/")
 print("  ui.routes يجب أن يرجع 12 route")
 print("  ui.sidebar يجب أن يرجع 13 item")
+"""
+
+# ── run_seed_ui.sh ────────────────────────────────────────────────────────────
+SHELL_CONTENT = """#!/usr/bin/env bash
+set -e
+BACKEND_DIR="$(dirname "$0")/pos_backend"
+echo "=============================="
+echo "  Seeding UI data ..."
+echo "=============================="
+cd "$BACKEND_DIR"
+python manage.py shell < seed_ui_data.py
+echo ""
+echo "  done — restart backend"
+"""
+
+# ── main ──────────────────────────────────────────────────────────────────────
+def main():
+    print()
+    print("=" * 62)
+    print("  fix_ui_components.py  ·  Component Names Audit Fix")
+    print("=" * 62)
+
+    print("\n[1] seed_ui_data.py ...")
+    backup(SEED_FILE)
+    write_file(SEED_FILE, SEED_CONTENT)
+
+    print("\n[2] run_seed_ui.sh ...")
+    backup(SHELL_FILE)
+    write_file(SHELL_FILE, SHELL_CONTENT)
+    os.chmod(SHELL_FILE, 0o755)
+
+    print("\n[3] README + CHANGELOG ...")
+    write_readme()
+    update_changelog(
+        "إصلاح component names في seed: XxxPage → اسم الملف الفعلي في src/pages/"
+    )
+
+    print()
+    print("=" * 62)
+    print("  ✅  اكتمل!")
+    print("=" * 62)
+    print("""
+  الخطوات:
+  1.  python3 fix_ui_components.py
+  2.  bash run_seed_ui.sh
+  3.  أعد تشغيل الـ backend
+  4.  في الـ browser: logout ثم login
+      → كل الـ routes والـ sidebar يظهروا صح
+""")
+
+
+if __name__ == "__main__":
+    main()

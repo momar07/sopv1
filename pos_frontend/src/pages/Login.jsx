@@ -5,28 +5,23 @@ import { useAuth } from '../context/AuthContext';
 function Login() {
   const navigate = useNavigate();
   const { login, user, loading: authLoading, isCashier } = useAuth();
-  
-  const [formData, setFormData] = useState({
-    username: '',
-    password: ''
-  });
-  const [error, setError] = useState('');
+
+  const [formData, setFormData] = useState({ username: '', password: '' });
+  const [error,   setError]   = useState('');
   const [loading, setLoading] = useState(false);
 
-  // إعادة توجيه المستخدم المسجل حسب صلاحيته
+  // ── إعادة التوجيه لو المستخدم مسجل بالفعل ──────────────────────────────
   useEffect(() => {
     if (user && !authLoading) {
-      // إذا كان الكاشير، وجهه إلى الخزنة
+      // الكاشير يروح للخزنة مباشرة
       if (isCashier && isCashier()) {
-        navigate('/cash-register');
+        navigate('/cash-register', { replace: true });
       } else {
-        // الـ Admin والـ Manager يذهبون إلى الصفحة الرئيسية (POS)
-        navigate('/');
+        navigate('/dashboard', { replace: true });
       }
     }
-  }, [user, authLoading, navigate]);
+  }, [user, authLoading, navigate, isCashier]);
 
-  // Show loading spinner while checking auth
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
@@ -42,44 +37,39 @@ function Login() {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     try {
       const result = await login(formData.username, formData.password);
-      
       if (result.success) {
-        // تم تسجيل الدخول بنجاح
-        navigate('/');
+        // الـ useEffect فوق هيتعامل مع الـ redirect
+        // بس نضيف fallback لو الـ useEffect أتأخر
+        if (isCashier && isCashier()) {
+          navigate('/cash-register', { replace: true });
+        } else {
+          navigate('/dashboard', { replace: true });
+        }
       } else {
         setError(result.error || 'فشل تسجيل الدخول');
       }
-    } catch (err) {
+    } catch {
       setError('خطأ في الاتصال بالسيرفر');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
-  };
+  const handleChange = (e) =>
+    setFormData({ ...formData, [e.target.name]: e.target.value });
 
-  // حسابات تجريبية للاختبار
   const demoAccounts = [
-    { username: 'admin', password: 'admin123', role: 'مدير النظام' },
-    { username: 'manager', password: 'manager123', role: 'مدير' },
-    { username: 'cashier1', password: 'cashier123', role: 'كاشير' }
+    { username: 'admin',    password: 'admin123',    role: 'مدير النظام' },
+    { username: 'manager',  password: 'manager123',  role: 'مدير'        },
+    { username: 'cashier1', password: 'cashier123',  role: 'كاشير'       },
   ];
 
-  const fillDemo = (username, password) => {
-    setFormData({ username, password });
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center px-4" dir="rtl">
       <div className="max-w-md w-full">
+
         {/* Logo & Title */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl mb-4 shadow-lg">
@@ -92,7 +82,8 @@ function Login() {
         {/* Login Form */}
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Username Field */}
+
+            {/* Username */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2 text-right">
                 اسم المستخدم
@@ -104,15 +95,15 @@ function Login() {
                   value={formData.username}
                   onChange={handleChange}
                   required
+                  autoComplete="username"
                   className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-right"
                   placeholder="أدخل اسم المستخدم"
-                  autoComplete="username"
                 />
                 <i className="fas fa-user absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"></i>
               </div>
             </div>
 
-            {/* Password Field */}
+            {/* Password */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2 text-right">
                 كلمة المرور
@@ -124,15 +115,15 @@ function Login() {
                   value={formData.password}
                   onChange={handleChange}
                   required
+                  autoComplete="current-password"
                   className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-right"
                   placeholder="أدخل كلمة المرور"
-                  autoComplete="current-password"
                 />
                 <i className="fas fa-lock absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"></i>
               </div>
             </div>
 
-            {/* Error Message */}
+            {/* Error */}
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-right">
                 <i className="fas fa-exclamation-circle ml-2"></i>
@@ -140,7 +131,7 @@ function Login() {
               </div>
             )}
 
-            {/* Submit Button */}
+            {/* Submit */}
             <button
               type="submit"
               disabled={loading}
@@ -162,19 +153,19 @@ function Login() {
 
           {/* Demo Accounts */}
           <div className="mt-8 pt-6 border-t border-gray-200">
-            <p className="text-sm text-gray-600 mb-4 text-center">حسابات تجريبية للاختبار:</p>
+            <p className="text-sm text-gray-600 mb-4 text-center">حسابات تجريبية:</p>
             <div className="space-y-2">
-              {demoAccounts.map((account, index) => (
+              {demoAccounts.map((acc, i) => (
                 <button
-                  key={index}
+                  key={i}
                   type="button"
-                  onClick={() => fillDemo(account.username, account.password)}
+                  onClick={() => setFormData({ username: acc.username, password: acc.password })}
                   className="w-full flex items-center justify-between px-4 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
                 >
-                  <span className="text-xs text-gray-500">{account.password}</span>
+                  <span className="text-xs text-gray-500">{acc.password}</span>
                   <div className="text-right">
-                    <span className="text-sm font-medium text-gray-700 ml-2">{account.username}</span>
-                    <span className="text-xs text-gray-500">({account.role})</span>
+                    <span className="text-sm font-medium text-gray-700 ml-2">{acc.username}</span>
+                    <span className="text-xs text-gray-500">({acc.role})</span>
                   </div>
                 </button>
               ))}
@@ -182,11 +173,8 @@ function Login() {
           </div>
         </div>
 
-        {/* Footer */}
         <div className="text-center mt-6">
-          <p className="text-sm text-gray-600">
-            نظام إدارة نقاط البيع الشامل v2.0
-          </p>
+          <p className="text-sm text-gray-600">نظام إدارة نقاط البيع الشامل v2.0</p>
         </div>
       </div>
     </div>
