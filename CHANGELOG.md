@@ -4,7 +4,7 @@
 
 ---
 
-## [2026-03-08 19:08] fix_unit_product
+## [2026-03-08 19:23] fix uom ui 1
 
 
 
@@ -54,3 +54,8 @@
 - Fix: endpoint /api/products/units/ → /api/units/
 - Fix: guard isinstance(items, list) قبل list comprehension
 - أضفنا اختبارات إضافية: PATCH, auth, search filter, profit_margin, is_low_stock
+
+## [2026-03-08 19:20] fix_units_api
+- أضفنا unitsAPI في api.js: getAll, getOne, create, update, delete, setUnitPrices
+- أضفنا UomPricesTab.jsx: تبويب الوحدات والأسعار داخل ProductModal
+

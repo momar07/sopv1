@@ -195,4 +195,16 @@ export const inventoryAPI = {
   getMovements:          (params) => api.get('/inventory/movements/', { params }),
 };
 
+
+// Units of Measure API
+export const unitsAPI = {
+  getAll:  (params) => api.get('/units/', { params }),
+  getOne:  (id)     => api.get(`/units/${id}/`),
+  create:  (data)   => api.post('/units/', data),
+  update:  (id, data) => api.put(`/units/${id}/`, data),
+  delete:  (id)     => api.delete(`/units/${id}/`),
+  setUnitPrices: (productId, prices) =>
+    api.post(`/products/${productId}/set_unit_prices/`, { prices }),
+};
+
 export default api;
