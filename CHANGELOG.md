@@ -4,7 +4,7 @@
 
 ---
 
-## [2026-03-08 18:25] uibuilder optimaization
+## [2026-03-08 18:36] fix_serialayzer
 
 
 
@@ -29,3 +29,8 @@
 
 ## [2026-03-08 18:21:09] - fix_ui_components.py
 - إصلاح component names في seed: XxxPage → اسم الملف الفعلي في src/pages/
+
+## [2026-03-08 18:33] fix_serializers
+- Fix-1: أزلنا تكرار StockAlert (3 → 1 loop) في sales/serializers.py
+- Fix-2: StockAdjustmentSerializer يحل/يُنشئ StockAlert بعد تعديل المخزون
+- Fix-3: PurchaseOrderItemSerializer أضاف حقل unit و unit_name

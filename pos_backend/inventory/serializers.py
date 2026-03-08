@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.db import transaction
 from django.db.models import F
+from django.utils import timezone
 from .models import Supplier, PurchaseOrder, PurchaseOrderItem, StockAdjustment, StockAlert, StockMovement
 from products.models import Product
 
@@ -17,26 +18,31 @@ class SupplierSerializer(serializers.ModelSerializer):
 
 
 class PurchaseOrderItemSerializer(serializers.ModelSerializer):
-    product_name       = serializers.CharField(source='product.name', read_only=True)
-    product_barcode    = serializers.CharField(source='product.barcode', read_only=True)
+    product_name    = serializers.CharField(source='product.name',    read_only=True)
+    product_barcode = serializers.CharField(source='product.barcode', read_only=True)
+    # ✅ Fix-3: أضفنا unit حتى يُحسب actual_quantity بشكل صحيح
+    unit_name          = serializers.CharField(source='unit.name', read_only=True, default=None)
     subtotal           = serializers.ReadOnlyField()
     remaining_quantity = serializers.ReadOnlyField()
 
     class Meta:
         model  = PurchaseOrderItem
         fields = ['id','product','product_name','product_barcode',
-                  'quantity','received_quantity','unit_cost','subtotal','remaining_quantity']
+                  'unit','unit_name',
+                  'quantity','received_quantity','unit_cost',
+                  'subtotal','remaining_quantity']
 
 
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     items         = PurchaseOrderItemSerializer(many=True)
-    supplier_name = serializers.CharField(source='supplier.name', read_only=True)
-    user_name     = serializers.CharField(source='user.username', read_only=True)
+    supplier_name = serializers.CharField(source='supplier.name',   read_only=True)
+    user_name     = serializers.CharField(source='user.username',   read_only=True)
 
     class Meta:
         model  = PurchaseOrder
-        fields = ['id','reference_number','supplier','supplier_name','user','user_name',
-                  'status','total_cost','notes','expected_date','received_at','created_at','items']
+        fields = ['id','reference_number','supplier','supplier_name',
+                  'user','user_name','status','total_cost','notes',
+                  'expected_date','received_at','created_at','items']
         read_only_fields = ['user','total_cost','received_at','created_at']
 
     @transaction.atomic
@@ -63,9 +69,9 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
 
 
 class StockAdjustmentSerializer(serializers.ModelSerializer):
-    product_name = serializers.CharField(source='product.name', read_only=True)
-    user_name    = serializers.CharField(source='user.username', read_only=True)
-    reason_display = serializers.CharField(source='get_reason_display', read_only=True)
+    product_name   = serializers.CharField(source='product.name',       read_only=True)
+    user_name      = serializers.CharField(source='user.username',       read_only=True)
+    reason_display = serializers.CharField(source='get_reason_display',  read_only=True)
 
     class Meta:
         model  = StockAdjustment
@@ -80,28 +86,54 @@ class StockAdjustmentSerializer(serializers.ModelSerializer):
         change  = validated_data['quantity_change']
         before  = product.stock
         after   = before + change
+
         if after < 0:
-            raise serializers.ValidationError(f"المخزون سيصبح سالباً ({after}). المخزون الحالي: {before}")
+            raise serializers.ValidationError(
+                f"المخزون سيصبح سالباً ({after}). المخزون الحالي: {before}"
+            )
+
         validated_data['quantity_before'] = before
         validated_data['quantity_after']  = after
         Product.objects.filter(id=product.id).update(stock=F('stock') + change)
+
         adj = StockAdjustment.objects.create(**validated_data)
+
         StockMovement.objects.create(
             product       = product,
             movement_type = 'adjustment',
             quantity      = change,
             stock_before  = before,
             stock_after   = after,
-            notes         = validated_data.get('notes',''),
+            notes         = validated_data.get('notes', ''),
             user          = validated_data.get('user'),
         )
+
+        # ✅ Fix-2: حل StockAlerts عند التعديل اليدوي إذا عادت الكمية طيبة
+        ALERT_THRESHOLD = 10
+        if after > ALERT_THRESHOLD:
+            # حلّ كل alerts غير محلولة للمنتج ده
+            StockAlert.objects.filter(product=product, is_resolved=False).update(
+                is_resolved = True,
+                resolved_at = timezone.now(),
+            )
+        elif after > 0 and after <= ALERT_THRESHOLD:
+            # حلّ alert "نفاد" فقط لو الكمية رجعت، وأنشئ "low" لو مافيش
+            StockAlert.objects.filter(
+                product=product, alert_type='out', is_resolved=False
+            ).update(is_resolved=True, resolved_at=timezone.now())
+            if not StockAlert.objects.filter(product=product, alert_type='low', is_resolved=False).exists():
+                StockAlert.objects.create(
+                    product=product, alert_type='low',
+                    threshold=ALERT_THRESHOLD, current_stock=after,
+                )
+
         return adj
 
 
 class StockAlertSerializer(serializers.ModelSerializer):
-    product_name     = serializers.CharField(source='product.name', read_only=True)
-    product_barcode  = serializers.CharField(source='product.barcode', read_only=True)
-    alert_type_display = serializers.CharField(source='get_alert_type_display', read_only=True)
+    product_name       = serializers.CharField(source='product.name',           read_only=True)
+    product_barcode    = serializers.CharField(source='product.barcode',         read_only=True)
+    alert_type_display = serializers.CharField(source='get_alert_type_display',  read_only=True)
 
     class Meta:
         model  = StockAlert
@@ -111,10 +143,10 @@ class StockAlertSerializer(serializers.ModelSerializer):
 
 
 class StockMovementSerializer(serializers.ModelSerializer):
-    product_name        = serializers.CharField(source='product.name', read_only=True)
-    product_barcode     = serializers.CharField(source='product.barcode', read_only=True)
-    movement_type_display = serializers.CharField(source='get_movement_type_display', read_only=True)
-    user_name           = serializers.CharField(source='user.username', read_only=True)
+    product_name          = serializers.CharField(source='product.name',              read_only=True)
+    product_barcode       = serializers.CharField(source='product.barcode',            read_only=True)
+    movement_type_display = serializers.CharField(source='get_movement_type_display',  read_only=True)
+    user_name             = serializers.CharField(source='user.username',              read_only=True)
 
     class Meta:
         model  = StockMovement

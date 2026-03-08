@@ -19,17 +19,17 @@ class SaleItemSerializer(serializers.ModelSerializer):
 
 
 class SaleSerializer(serializers.ModelSerializer):
-    items = SaleItemSerializer(many=True, required=False)
+    items         = SaleItemSerializer(many=True, required=False)
     customer_name = serializers.CharField(source='customer.name', read_only=True)
-    user_name = serializers.SerializerMethodField()
-    user_role = serializers.SerializerMethodField()
-    items_count = serializers.ReadOnlyField()
-    total_profit = serializers.ReadOnlyField()
-    has_returns = serializers.SerializerMethodField()
+    user_name     = serializers.SerializerMethodField()
+    user_role     = serializers.SerializerMethodField()
+    items_count   = serializers.ReadOnlyField()
+    total_profit  = serializers.ReadOnlyField()
+    has_returns   = serializers.SerializerMethodField()
     returns_count = serializers.SerializerMethodField()
 
     class Meta:
-        model = Sale
+        model  = Sale
         fields = [
             'id', 'invoice_number', 'customer', 'customer_name',
             'user', 'user_name', 'user_role',
@@ -53,14 +53,10 @@ class SaleSerializer(serializers.ModelSerializer):
             groups = [g.name for g in obj.user.groups.all()]
         except Exception:
             groups = []
-        if 'Admins' in groups:
-            return 'مدير النظام'
-        if 'Managers' in groups:
-            return 'مدير'
-        if 'Cashier Plus' in groups:
-            return 'كاشير بلس'
-        if 'Cashiers' in groups:
-            return 'كاشير'
+        if 'Admins'    in groups: return 'مدير النظام'
+        if 'Managers'  in groups: return 'مدير'
+        if 'Cashier Plus' in groups: return 'كاشير بلس'
+        if 'Cashiers'  in groups: return 'كاشير'
         return groups[0] if groups else None
 
     def get_has_returns(self, obj):
@@ -71,43 +67,34 @@ class SaleSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        from inventory.models import StockMovement
+        from inventory.models import StockMovement, StockAlert
 
         items_data = validated_data.pop('items', [])
         sale = Sale.objects.create(**validated_data)
 
-        # المستخدم من الـ request context
-        user = None
         request = self.context.get('request')
-        if request and hasattr(request, 'user'):
-            user = request.user
+        user    = request.user if request and hasattr(request, 'user') else None
+
+        ALERT_THRESHOLD = 10
 
         for item_data in items_data:
             product_id = item_data.pop('product_id', None) or item_data.get('product')
             if not product_id:
-                raise serializers.ValidationError(
-                    "يجب إرسال product_id أو product لكل عنصر"
-                )
+                raise serializers.ValidationError("يجب إرسال product_id أو product لكل عنصر")
 
             try:
                 product = Product.objects.select_for_update().get(id=product_id)
             except Product.DoesNotExist:
-                raise serializers.ValidationError(
-                    f"المنتج غير موجود: {product_id}"
-                )
+                raise serializers.ValidationError(f"المنتج غير موجود: {product_id}")
 
             qty = int(item_data.get('quantity') or 0)
             if qty <= 0:
-                raise serializers.ValidationError(
-                    f"كمية غير صحيحة للمنتج: {product.name}"
-                )
+                raise serializers.ValidationError(f"كمية غير صحيحة للمنتج: {product.name}")
 
             stock_before = product.stock
 
-            # ✅ خصم المخزون atomic مع التحقق من الكفاية
             updated_rows = Product.objects.filter(
-                id=product.id,
-                stock__gte=qty
+                id=product.id, stock__gte=qty
             ).update(stock=F('stock') - qty)
 
             if not updated_rows:
@@ -119,100 +106,37 @@ class SaleSerializer(serializers.ModelSerializer):
 
             stock_after = stock_before - qty
 
-            # ✅ تسجيل حركة المخزون (StockMovement)
             StockMovement.objects.create(
-                product=product,
-                movement_type='sale',
-                quantity=-qty,                  # سالب لأنه خصم
-                stock_before=stock_before,
-                stock_after=stock_after,
-                reference=sale.invoice_number or str(sale.id)[:8],
-                notes=f"بيع فاتورة #{sale.invoice_number or str(sale.id)[:8]}",
-                user=user,
+                product       = product,
+                movement_type = 'sale',
+                quantity      = -qty,
+                stock_before  = stock_before,
+                stock_after   = stock_after,
+                reference     = sale.invoice_number or str(sale.id)[:8],
+                notes         = f"بيع فاتورة #{sale.invoice_number or str(sale.id)[:8]}",
+                user          = user,
             )
 
             item_data['product_name'] = item_data.get('product_name') or product.name
+            SaleItem.objects.create(sale=sale, product=product, **item_data)
 
-            SaleItem.objects.create(
-                sale=sale,
-                product=product,
-                **item_data
-            )
-
-        # ✅ Fix-1: StockAlert تلقائي بعد البيع
-        from inventory.models import StockAlert
-        ALERT_THRESHOLD = 10
-        for item_obj in sale.items.select_related('product').all():
-            prod = item_obj.product
-            if not prod:
-                continue
-            prod.refresh_from_db()
-            # تجاهل لو فيه alert غير محلول للمنتج ده
-            if StockAlert.objects.filter(product=prod, is_resolved=False).exists():
-                continue
-            if prod.stock == 0:
-                StockAlert.objects.create(
-                    product=prod,
-                    alert_type='out',
-                    threshold=ALERT_THRESHOLD,
-                    current_stock=0,
-                )
-            elif prod.stock <= ALERT_THRESHOLD:
-                StockAlert.objects.create(
-                    product=prod,
-                    alert_type='low',
-                    threshold=ALERT_THRESHOLD,
-                    current_stock=prod.stock,
-                )
-
-        # ✅ Fix-1: StockAlert تلقائي بعد البيع
-        from inventory.models import StockAlert
-        ALERT_THRESHOLD = 10
-        for _item in sale.items.select_related('product').all():
-            _prod = _item.product
-            if not _prod:
-                continue
-            _prod.refresh_from_db()
-            if StockAlert.objects.filter(product=_prod, is_resolved=False).exists():
-                continue
-            if _prod.stock == 0:
-                StockAlert.objects.create(
-                    product=_prod,
-                    alert_type='out',
-                    threshold=ALERT_THRESHOLD,
-                    current_stock=0,
-                )
-            elif _prod.stock <= ALERT_THRESHOLD:
-                StockAlert.objects.create(
-                    product=_prod,
-                    alert_type='low',
-                    threshold=ALERT_THRESHOLD,
-                    current_stock=_prod.stock,
-                )
-
-        # ✅ Fix-1: StockAlert تلقائي بعد البيع
-        from inventory.models import StockAlert
-        _THRESHOLD = 10
-        for _si in sale.items.select_related('product').all():
-            _p = _si.product
-            if not _p:
-                continue
-            _p.refresh_from_db()
-            if StockAlert.objects.filter(product=_p, is_resolved=False).exists():
-                continue
-            if _p.stock == 0:
-                StockAlert.objects.create(
-                    product=_p, alert_type='out',
-                    threshold=_THRESHOLD, current_stock=0)
-            elif _p.stock <= _THRESHOLD:
-                StockAlert.objects.create(
-                    product=_p, alert_type='low',
-                    threshold=_THRESHOLD, current_stock=_p.stock)
+            # ✅ StockAlert مرة واحدة فقط — داخل حلقة الأصناف مباشرةً
+            if not StockAlert.objects.filter(product=product, is_resolved=False).exists():
+                if stock_after == 0:
+                    StockAlert.objects.create(
+                        product=product, alert_type='out',
+                        threshold=ALERT_THRESHOLD, current_stock=0,
+                    )
+                elif stock_after <= ALERT_THRESHOLD:
+                    StockAlert.objects.create(
+                        product=product, alert_type='low',
+                        threshold=ALERT_THRESHOLD, current_stock=stock_after,
+                    )
 
         # تحديث بيانات العميل
         if sale.customer and sale.status == 'completed':
             sale.customer.total_purchases += sale.total
-            sale.customer.points += int(sale.total)
+            sale.customer.points          += int(sale.total)
             sale.customer.save(update_fields=['total_purchases', 'points'])
 
         return sale
@@ -234,9 +158,7 @@ class SaleListSerializer(serializers.ModelSerializer):
         ]
 
     def get_user_name(self, obj):
-        if obj.user:
-            return obj.user.get_full_name() or obj.user.username
-        return 'غير محدد'
+        return obj.user.get_full_name() or obj.user.username if obj.user else 'غير محدد'
 
     def get_has_returns(self, obj):
         return obj.returns.exists()
@@ -246,10 +168,10 @@ class SaleListSerializer(serializers.ModelSerializer):
 
 
 class SalesStatsSerializer(serializers.Serializer):
-    today_sales = serializers.DecimalField(max_digits=10, decimal_places=2)
-    today_count = serializers.IntegerField()
-    week_sales = serializers.DecimalField(max_digits=10, decimal_places=2)
-    month_sales = serializers.DecimalField(max_digits=10, decimal_places=2)
+    today_sales  = serializers.DecimalField(max_digits=10, decimal_places=2)
+    today_count  = serializers.IntegerField()
+    week_sales   = serializers.DecimalField(max_digits=10, decimal_places=2)
+    month_sales  = serializers.DecimalField(max_digits=10, decimal_places=2)
     total_profit = serializers.DecimalField(max_digits=10, decimal_places=2)
     top_products = serializers.ListField()
     recent_sales = SaleListSerializer(many=True)
