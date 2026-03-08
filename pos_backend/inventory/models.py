@@ -77,14 +77,12 @@ class PurchaseOrderItem(models.Model):
 
     @property
     def factor(self):
-        """معامل تحويل الوحدة"""
         if self.unit and self.unit.factor:
             return float(self.unit.factor)
         return 1.0
 
     @property
     def actual_quantity(self):
-        """الكمية الفعلية بالوحدة الأساسية"""
         return int(self.quantity * self.factor)
 
     @property
@@ -138,14 +136,39 @@ class StockAlert(models.Model):
         ('out',    'نفاد المخزون'),
         ('expiry', 'قرب انتهاء الصلاحية'),
     ]
+    PRIORITY = [
+        ('low',      'منخفضة'),
+        ('medium',   'متوسطة'),
+        ('high',     'عالية'),
+        ('critical', 'حرجة'),
+    ]
+    STATUS_CHOICES = [
+        ('open',        'مفتوحة'),
+        ('in_progress', 'قيد المعالجة'),
+        ('ordered',     'تم الطلب'),
+        ('resolved',    'محلولة'),
+    ]
+
     id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    product       = models.ForeignKey('products.Product', on_delete=models.CASCADE)
+    product       = models.ForeignKey('products.Product', on_delete=models.CASCADE, related_name='alerts')
     alert_type    = models.CharField(max_length=20, choices=TYPES, default='low')
     threshold     = models.IntegerField(default=10)
     current_stock = models.IntegerField(default=0)
+    priority      = models.CharField(max_length=10, choices=PRIORITY, default='medium')
+    ticket_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    assigned_to   = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='assigned_alerts'
+    )
+    deadline      = models.DateField(null=True, blank=True)
+    linked_po     = models.ForeignKey(
+        PurchaseOrder, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='linked_alerts'
+    )
     is_resolved   = models.BooleanField(default=False)
     resolved_at   = models.DateTimeField(null=True, blank=True)
     created_at    = models.DateTimeField(auto_now_add=True)
+    updated_at    = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name        = 'تنبيه مخزون'
@@ -154,6 +177,44 @@ class StockAlert(models.Model):
 
     def __str__(self):
         return self.product.name + ' - ' + self.alert_type
+
+    def resolve(self, user=None):
+        from django.utils import timezone
+        self.is_resolved   = True
+        self.ticket_status = 'resolved'
+        self.resolved_at   = timezone.now()
+        self.save(update_fields=['is_resolved', 'ticket_status', 'resolved_at'])
+
+
+class StockAlertNote(models.Model):
+    NOTE_TYPES = [
+        ('note',   'ملاحظة'),
+        ('quote',  'عرض سعر'),
+        ('action', 'إجراء'),
+        ('delay',  'سبب تأخير'),
+        ('system', 'تحديث نظام'),
+    ]
+    id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    alert         = models.ForeignKey(StockAlert, on_delete=models.CASCADE, related_name='notes')
+    user          = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL
+    )
+    note_type     = models.CharField(max_length=10, choices=NOTE_TYPES, default='note')
+    text          = models.TextField()
+    cost          = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    expected_date = models.DateField(null=True, blank=True)
+    delay_reason  = models.TextField(blank=True, default='')
+    supplier_name = models.CharField(max_length=200, blank=True, default='')
+    created_at    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = 'ملاحظة تذكرة'
+        verbose_name_plural = 'ملاحظات التذاكر'
+        ordering            = ['created_at']
+
+    def __str__(self):
+        return f'[{self.note_type}] {self.alert.product.name}'
 
 
 class StockMovement(models.Model):

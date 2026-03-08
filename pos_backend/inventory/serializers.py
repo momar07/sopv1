@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
-from .models import Supplier, PurchaseOrder, PurchaseOrderItem, StockAdjustment, StockAlert, StockMovement
+from .models import Supplier, PurchaseOrder, PurchaseOrderItem, StockAdjustment, StockAlert, StockAlertNote, StockMovement
 from products.models import Product
 
 
@@ -130,17 +130,54 @@ class StockAdjustmentSerializer(serializers.ModelSerializer):
         return adj
 
 
+
+
+class StockAlertNoteSerializer(serializers.ModelSerializer):
+    user_name         = serializers.CharField(source='user.username', read_only=True)
+    note_type_display = serializers.CharField(source='get_note_type_display', read_only=True)
+
+    class Meta:
+        model  = StockAlertNote
+        fields = [
+            'id', 'alert', 'user', 'user_name',
+            'note_type', 'note_type_display', 'text',
+            'cost', 'expected_date', 'delay_reason', 'supplier_name',
+            'created_at',
+        ]
+        read_only_fields = ['user', 'created_at']
+
 class StockAlertSerializer(serializers.ModelSerializer):
-    product_name       = serializers.CharField(source='product.name',           read_only=True)
-    product_barcode    = serializers.CharField(source='product.barcode',         read_only=True)
-    alert_type_display = serializers.CharField(source='get_alert_type_display',  read_only=True)
+    product_name          = serializers.CharField(source='product.name',               read_only=True)
+    product_barcode       = serializers.CharField(source='product.barcode',             read_only=True)
+    product_current_stock = serializers.IntegerField(source='product.stock',            read_only=True)
+    alert_type_display    = serializers.CharField(source='get_alert_type_display',      read_only=True)
+    priority_display      = serializers.CharField(source='get_priority_display',        read_only=True)
+    ticket_status_display = serializers.CharField(source='get_ticket_status_display',   read_only=True)
+    assigned_to_name      = serializers.CharField(source='assigned_to.username',        read_only=True)
+    linked_po_reference   = serializers.CharField(source='linked_po.reference_number',  read_only=True)
+    linked_po_status      = serializers.CharField(source='linked_po.status',            read_only=True)
+    notes                 = StockAlertNoteSerializer(many=True, read_only=True)
+    notes_count           = serializers.SerializerMethodField()
 
     class Meta:
         model  = StockAlert
-        fields = ['id','product','product_name','product_barcode',
-                  'alert_type','alert_type_display','threshold','current_stock',
-                  'is_resolved','resolved_at','created_at']
+        fields = [
+            'id', 'product', 'product_name', 'product_barcode', 'product_current_stock',
+            'alert_type', 'alert_type_display',
+            'threshold', 'current_stock',
+            'priority', 'priority_display',
+            'ticket_status', 'ticket_status_display',
+            'assigned_to', 'assigned_to_name',
+            'deadline',
+            'linked_po', 'linked_po_reference', 'linked_po_status',
+            'is_resolved', 'resolved_at',
+            'notes', 'notes_count',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['is_resolved', 'resolved_at', 'created_at', 'updated_at']
 
+    def get_notes_count(self, obj):
+        return obj.notes.count()
 
 class StockMovementSerializer(serializers.ModelSerializer):
     product_name          = serializers.CharField(source='product.name',              read_only=True)

@@ -1,0 +1,1453 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import { inventoryAPI, productsAPI } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+
+const fmt = (n) => Number(n || 0).toFixed(2);
+
+const Badge = ({ label, color }) => {
+  const map = {
+    green:  'bg-green-100 text-green-800',
+    red:    'bg-red-100 text-red-800',
+    yellow: 'bg-yellow-100 text-yellow-800',
+    blue:   'bg-blue-100 text-blue-800',
+    gray:   'bg-gray-100 text-gray-600',
+    purple: 'bg-purple-100 text-purple-800',
+  };
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${map[color]||map.gray}`}>{label}</span>;
+};
+
+const statusColor  = (s) => ({ draft:'gray', ordered:'blue', received:'green', cancelled:'red' }[s]||'gray');
+const alertColor   = (t) => ({ out:'red', low:'yellow', expiry:'yellow' }[t]||'gray');
+const movementColor= (t) => ({ sale:'red', purchase:'green', adjustment:'blue', return:'purple', initial:'gray' }[t]||'gray');
+
+const Spinner = () => (
+  <div className="flex items-center justify-center h-40">
+    <i className="fas fa-spinner fa-spin text-4xl text-blue-500"></i>
+  </div>
+);
+
+const Toast = ({ msg, type }) => (
+  <div className={`fixed top-5 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-2xl shadow-xl font-bold text-sm
+    ${type==='error'?'bg-red-600 text-white':'bg-green-600 text-white'}`}>{msg}</div>
+);
+
+const Modal = ({ title, onClose, children }) => (
+  <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+      onClick={(e)=>e.stopPropagation()}>
+      <div className="flex justify-between items-center px-5 py-4 border-b">
+        <h3 className="font-black text-gray-800">{title}</h3>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-700 font-black text-xl">x</button>
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
+  </div>
+);
+
+const Field = ({ label, children }) => (
+  <div>
+    <label className="block text-xs font-bold text-gray-500 mb-1">{label}</label>
+    {children}
+  </div>
+);
+
+const INP = 'w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white transition';
+
+export default function InventoryPage() {
+  const [tab, setTab] = useState('summary');
+  const tabs = [
+    { key:'summary',   label:'📊 ملخص المخزون' },
+    { key:'orders',    label:'📦 أوامر الشراء'  },
+    { key:'adjust',    label:'⚖️ تسوية المخزون' },
+    { key:'movements', label:'🔄 حركة المخزون'  },
+    { key:'alerts',    label:'🔔 التنبيهات'     },
+    { key:'suppliers', label:'🏭 الموردون'       },
+  ];
+  return (
+    <div dir="rtl" className="p-4 min-h-screen bg-gray-50">
+      <div className="mb-5">
+        <h1 className="text-2xl font-black text-gray-800">🏪 إدارة المخزون</h1>
+        <p className="text-gray-500 text-sm mt-1">استلام البضاعة · تسوية المخزون · تنبيهات النقص · حركات المخزون</p>
+      </div>
+      <div className="flex gap-2 flex-wrap mb-5">
+        {tabs.map((t) => (
+          <button key={t.key} onClick={()=>setTab(t.key)}
+            className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${
+              tab===t.key ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+            }`}>{t.label}</button>
+        ))}
+      </div>
+      {tab==='summary'   && <SummaryPanel />}
+      {tab==='orders'    && <PurchaseOrdersPanel />}
+      {tab==='adjust'    && <AdjustPanel />}
+      {tab==='movements' && <MovementsPanel />}
+      {tab==='alerts'    && <AlertsPanel />}
+      {tab==='suppliers' && <SuppliersPanel />}
+    </div>
+  );
+}
+
+// Summary
+function SummaryPanel() {
+  const [summary, setSummary]         = useState(null);
+  const [lowProducts, setLow]         = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [quickOrderProduct, setQuick] = useState(null);
+  const [suppliers, setSuppliers]     = useState([]);
+  const [toast, setToast]             = useState(null);
+  const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [s, lp, sup] = await Promise.all([
+        inventoryAPI.getAlertsSummary({ threshold:10 }),
+        productsAPI.getLowStock(),
+        inventoryAPI.getSuppliers(),
+      ]);
+      setSummary(s.data);
+      setLow(lp.data?.results || lp.data || []);
+      setSuppliers(sup.data?.results || sup.data || []);
+    } catch { /**/ } finally { setLoading(false); }
+  }, []);
+
+  useEffect(()=>{ load(); }, [load]);
+
+  const handleGenerate = async () => {
+    try {
+      const r = await inventoryAPI.checkAndGenerateAlerts({ threshold:10 });
+      notify(`تم انشاء ${r.data.created_alerts} تنبيه جديد`);
+      load();
+    } catch { notify('خطأ في توليد التنبيهات','error'); }
+  };
+
+  if (loading) return <Spinner />;
+
+  const cards = [
+    { label:'اجمالي المنتجات',    value: summary?.total_products   ||0, color:'blue',   icon:'📦' },
+    { label:'مخزون منخفض',        value: summary?.low_stock        ||0, color:'yellow', icon:'⚠️' },
+    { label:'نفاد المخزون',        value: summary?.out_of_stock     ||0, color:'red',    icon:'🚨' },
+    { label:'مخزون كافي',          value: summary?.healthy_stock    ||0, color:'green',  icon:'✅' },
+    { label:'تنبيهات غير محلولة', value: summary?.unresolved_alerts||0, color:'red',    icon:'🔔' },
+  ];
+  const cm = {
+    blue:   'bg-blue-50 border-blue-200 text-blue-700',
+    yellow: 'bg-yellow-50 border-yellow-200 text-yellow-700',
+    red:    'bg-red-50 border-red-200 text-red-700',
+    green:  'bg-green-50 border-green-200 text-green-700',
+  };
+
+  return (
+    <div className="space-y-6">
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        {cards.map((c) => (
+          <div key={c.label} className={`rounded-2xl border p-4 ${cm[c.color]}`}>
+            <div className="text-2xl mb-1">{c.icon}</div>
+            <div className="text-3xl font-black">{c.value}</div>
+            <div className="text-sm font-semibold mt-1">{c.label}</div>
+          </div>
+        ))}
+      </div>
+      <button onClick={handleGenerate}
+        className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition">
+        🔄 فحص وتحديث التنبيهات
+      </button>
+      {lowProducts.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b bg-yellow-50">
+            <h2 className="font-black text-yellow-800">⚠️ منتجات تحتاج اعادة طلب ({lowProducts.length})</h2>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-gray-500 text-right">
+                <th className="px-4 py-3 font-bold">المنتج</th>
+                <th className="px-4 py-3 font-bold">الباركود</th>
+                <th className="px-4 py-3 font-bold">المخزون</th>
+                <th className="px-4 py-3 font-bold">سعر البيع</th>
+                <th className="px-4 py-3 font-bold">اجراء</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lowProducts.map((p) => (
+                <tr key={p.id} className="border-t hover:bg-gray-50">
+                  <td className="px-4 py-3 font-bold">{p.name}</td>
+                  <td className="px-4 py-3 text-gray-500">{p.barcode||'—'}</td>
+                  <td className="px-4 py-3">
+                    <span className={`font-black ${p.stock===0?'text-red-600':'text-yellow-600'}`}>{p.stock}</span>
+                  </td>
+                  <td className="px-4 py-3">{fmt(p.price)} ج</td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => setQuick(p)}
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+                      📦 طلب شراء
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {quickOrderProduct && (
+        <QuickOrderModal
+          product={quickOrderProduct}
+          suppliers={suppliers}
+          onClose={() => setQuick(null)}
+          onSaved={() => { setQuick(null); notify('تم انشاء طلب الشراء بنجاح'); }}
+          onError={(msg) => notify('خطأ: ' + msg, 'error')}
+        />
+      )}
+    </div>
+  );
+}
+
+// Purchase Orders
+function PurchaseOrdersPanel() {
+  const [orders, setOrders]       = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [products, setProducts]   = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [showForm, setShowForm]   = useState(false);
+  const [selected, setSelected]   = useState(null);
+  const [toast, setToast]         = useState(null);
+  const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [o,s,p] = await Promise.all([
+        inventoryAPI.getPurchaseOrders(),
+        inventoryAPI.getSuppliers(),
+        productsAPI.getAll({ page_size:200 }),
+      ]);
+      setOrders(o.data?.results||o.data||[]);
+      setSuppliers(s.data?.results||s.data||[]);
+      setProducts(p.data?.results||p.data||[]);
+    } catch {/**/ } finally { setLoading(false); }
+  }, []);
+
+  useEffect(()=>{ load(); }, [load]);
+
+  const handleReceive = async (order, receivedQtys) => {
+    try {
+      await inventoryAPI.receivePurchaseOrder(order.id, { received_quantities: receivedQtys });
+      notify('تم استلام البضاعة وتحديث المخزون');
+      setSelected(null); load();
+    } catch(e) { notify('خطأ: '+(e?.response?.data?.error||'خطأ في الاستلام'),'error'); }
+  };
+
+  const handleCancel = async (id) => {
+    if (!window.confirm('هل انت متاكد من الغاء الامر؟')) return;
+    try { await inventoryAPI.cancelPurchaseOrder(id); notify('تم الالغاء'); load(); }
+    catch(e) { notify('خطأ: '+(e?.response?.data?.error||'خطأ'),'error'); }
+  };
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div className="space-y-4">
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+      <div className="flex justify-between items-center">
+        <h2 className="font-black text-gray-700 text-lg">اوامر الشراء</h2>
+        <button onClick={()=>setShowForm(true)}
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-sm">
+          ➕ امر شراء جديد
+        </button>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <table className="w-full text-sm">
+          <thead><tr className="bg-gray-50 text-gray-500 text-right">
+            <th className="px-4 py-3 font-bold">رقم المرجع</th>
+            <th className="px-4 py-3 font-bold">المورد</th>
+            <th className="px-4 py-3 font-bold">الحالة</th>
+            <th className="px-4 py-3 font-bold">الاجمالي</th>
+            <th className="px-4 py-3 font-bold">التاريخ</th>
+            <th className="px-4 py-3 font-bold">اجراءات</th>
+          </tr></thead>
+          <tbody>
+            {orders.length===0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">لا توجد اوامر شراء</td></tr>}
+            {orders.map((o)=>(
+              <tr key={o.id} className="border-t hover:bg-gray-50">
+                <td className="px-4 py-3 font-bold text-blue-700">{o.reference_number}</td>
+                <td className="px-4 py-3">{o.supplier_name||'—'}</td>
+                <td className="px-4 py-3"><Badge label={o.status} color={statusColor(o.status)} /></td>
+                <td className="px-4 py-3 font-bold">{fmt(o.total_cost)} ج</td>
+                <td className="px-4 py-3 text-gray-500">{o.created_at?.split('T')[0]}</td>
+                <td className="px-4 py-3 flex gap-2">
+                  {(o.status==='ordered'||o.status==='draft') && (
+                    <button onClick={()=>setSelected(o)}
+                      className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-3 py-1 rounded-lg">
+                      📥 استلام
+                    </button>
+                  )}
+                  {o.status!=='received'&&o.status!=='cancelled' && (
+                    <button onClick={()=>handleCancel(o.id)}
+                      className="bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold px-3 py-1 rounded-lg">
+                      الغاء
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {showForm && (
+        <NewOrderModal suppliers={suppliers} products={products}
+          onClose={()=>setShowForm(false)}
+          onSaved={()=>{ setShowForm(false); load(); notify('تم انشاء امر الشراء'); }}
+          onError={(msg)=>notify('خطأ: '+msg,'error')} />
+      )}
+      {selected && (
+        <ReceiveModal order={selected} onClose={()=>setSelected(null)} onReceive={handleReceive} />
+      )}
+    </div>
+  );
+}
+
+function NewOrderModal({ suppliers, products, onClose, onSaved, onError }) {
+  const [form, setForm] = useState({
+    reference_number: `PO-${Date.now()}`,
+    supplier: '', expected_date: '', notes: '', status: 'ordered',
+  });
+  const [items, setItems] = useState([{ product:'', quantity:1, unit_cost:'' }]);
+  const [saving, setSaving] = useState(false);
+
+  const addItem    = () => setItems([...items,{ product:'', quantity:1, unit_cost:'' }]);
+  const removeItem = (i) => setItems(items.filter((_,idx)=>idx!==i));
+  const updateItem = (i,field,val) => { const n=[...items]; n[i]={...n[i],[field]:val}; setItems(n); };
+
+  const handleSave = async () => {
+    if (!form.reference_number) return onError('رقم المرجع مطلوب');
+    const valid = items.filter(it=>it.product&&it.quantity>0&&it.unit_cost);
+    if (!valid.length) return onError('اضف منتجا واحدا على الاقل');
+    setSaving(true);
+    try {
+      await inventoryAPI.createPurchaseOrder({
+        ...form, supplier: form.supplier||null,
+        items: valid.map(it=>({...it, quantity:Number(it.quantity), unit_cost:Number(it.unit_cost)}))
+      });
+      onSaved();
+    } catch(e) { onError(JSON.stringify(e?.response?.data||'خطأ')); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Modal title="امر شراء جديد" onClose={onClose}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="رقم المرجع *">
+            <input className={INP} value={form.reference_number}
+              onChange={e=>setForm({...form,reference_number:e.target.value})} />
+          </Field>
+          <Field label="المورد">
+            <select className={INP} value={form.supplier}
+              onChange={e=>setForm({...form,supplier:e.target.value})}>
+              <option value="">بدون مورد</option>
+              {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+          <Field label="تاريخ الاستلام المتوقع">
+            <input type="date" className={INP} value={form.expected_date}
+              onChange={e=>setForm({...form,expected_date:e.target.value})} />
+          </Field>
+          <Field label="الحالة">
+            <select className={INP} value={form.status}
+              onChange={e=>setForm({...form,status:e.target.value})}>
+              <option value="draft">مسودة</option>
+              <option value="ordered">تم الطلب</option>
+            </select>
+          </Field>
+        </div>
+        <Field label="ملاحظات">
+          <textarea className={INP} rows={2} value={form.notes}
+            onChange={e=>setForm({...form,notes:e.target.value})} />
+        </Field>
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <span className="font-bold text-gray-700 text-sm">المنتجات</span>
+            <button onClick={addItem} className="text-blue-600 text-sm font-bold hover:underline">+ اضافة منتج</button>
+          </div>
+          {items.map((item,i)=>(
+            <div key={i} className="flex gap-2 mb-2 items-end">
+              <div className="flex-1">
+                <select className={INP+' text-xs'} value={item.product}
+                  onChange={e=>updateItem(i,'product',e.target.value)}>
+                  <option value="">اختر منتج</option>
+                  {products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div className="w-20">
+                <input type="number" className={INP+' text-xs text-center'} placeholder="الكمية"
+                  min={1} value={item.quantity}
+                  onChange={e=>updateItem(i,'quantity',e.target.value)} />
+              </div>
+              <div className="w-24">
+                <input type="number" className={INP+' text-xs text-center'} placeholder="التكلفة"
+                  min={0} step="0.01" value={item.unit_cost}
+                  onChange={e=>updateItem(i,'unit_cost',e.target.value)} />
+              </div>
+              <button onClick={()=>removeItem(i)}
+                className="text-red-500 font-black text-xl leading-none mb-1">x</button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-3 justify-end pt-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">الغاء</button>
+          <button onClick={handleSave} disabled={saving}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2 rounded-xl text-sm">
+            {saving?'...':'حفظ'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ReceiveModal({ order, onClose, onReceive }) {
+  const [qtys, setQtys]     = useState({});
+  const [receiving, setRec] = useState(false);
+  useEffect(()=>{
+    const init={};
+    (order.items||[]).forEach(it=>{ init[it.id]=it.remaining_quantity??it.quantity; });
+    setQtys(init);
+  }, [order]);
+  const handleSubmit = async () => { setRec(true); await onReceive(order,qtys); setRec(false); };
+  return (
+    <Modal title={`استلام امر #${order.reference_number}`} onClose={onClose}>
+      <table className="w-full text-sm mb-4">
+        <thead><tr className="bg-gray-50 text-gray-500 text-right">
+          <th className="px-3 py-2 font-bold">المنتج</th>
+          <th className="px-3 py-2 font-bold">مطلوب</th>
+          <th className="px-3 py-2 font-bold">مستلم فعليا</th>
+        </tr></thead>
+        <tbody>
+          {(order.items||[]).map(it=>(
+            <tr key={it.id} className="border-t">
+              <td className="px-3 py-2">{it.product_name}</td>
+              <td className="px-3 py-2 font-bold">{it.quantity}</td>
+              <td className="px-3 py-2">
+                <input type="number" min={0} max={it.quantity}
+                  value={qtys[it.id]??it.quantity}
+                  onChange={e=>setQtys({...qtys,[it.id]:Number(e.target.value)})}
+                  className={INP+' w-20 text-center'} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="flex gap-3 justify-end">
+        <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">الغاء</button>
+        <button onClick={handleSubmit} disabled={receiving}
+          className="bg-green-600 hover:bg-green-700 text-white font-bold px-5 py-2 rounded-xl text-sm">
+          {receiving?'...':'تاكيد الاستلام'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// Stock Adjustment
+function AdjustPanel() {
+  const { user }                = useAuth();
+  // ✅ أمين المخزن لا يقدر يزيد المخزون يدوياً
+  const userGroups              = user?.groups?.map(g => g.name) || [];
+  const canIncreaseStock        = user?.is_superuser ||
+                                  userGroups.includes('Admins') ||
+                                  userGroups.includes('Managers');
+
+  const [adjustments, setAdj]   = useState([]);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [form, setForm]         = useState({ product:'', quantity_change:'', reason:'count', notes:'' });
+  const [saving, setSaving]     = useState(false);
+  const [toast, setToast]       = useState(null);
+  const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [a,p] = await Promise.all([
+        inventoryAPI.getAdjustments(),
+        productsAPI.getAll({ page_size:200 }),
+      ]);
+      setAdj(a.data?.results||a.data||[]);
+      setProducts(p.data?.results||p.data||[]);
+    } catch {/**/ } finally { setLoading(false); }
+  }, []);
+
+  useEffect(()=>{ load(); }, [load]);
+
+  const handleSave = async () => {
+    if (!form.product||!form.quantity_change) return notify('اختر المنتج وادخل الكمية','error');
+    setSaving(true);
+    try {
+      await inventoryAPI.createAdjustment({
+        product: form.product,
+        quantity_change: Number(form.quantity_change),
+        reason: form.reason,
+        notes: form.notes,
+      });
+      notify('تمت التسوية بنجاح');
+      setForm({ product:'', quantity_change:'', reason:'count', notes:'' });
+      load();
+    } catch(e) {
+      notify('خطأ: '+(e?.response?.data?.[0]||JSON.stringify(e?.response?.data)||'خطأ'),'error');
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <Spinner />;
+
+  const reasonLabels = {
+    count:'جرد دوري', damage:'تلف', loss:'فقد/سرقة',
+    return:'مرتجع', expiry:'انتهاء صلاحية', other:'اخرى',
+  };
+
+  return (
+    <div className="space-y-5">
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        <h2 className="font-black text-gray-700 mb-4">تسوية مخزون جديدة</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="المنتج *">
+            <select className={INP} value={form.product}
+              onChange={e=>setForm({...form,product:e.target.value})}>
+              <option value="">اختر منتج</option>
+              {products.map(p=><option key={p.id} value={p.id}>{p.name} ({p.stock})</option>)}
+            </select>
+          </Field>
+          <Field label="الكمية (+ اضافة / - خصم) *">
+            <input
+              type="number"
+              className={INP}
+              placeholder={canIncreaseStock ? 'مثال: 10 او -5' : 'مثال: -5 (تخفيض فقط)'}
+              value={form.quantity_change}
+              min={canIncreaseStock ? undefined : undefined}
+              onChange={e => {
+                const val = e.target.value;
+                // ✅ أمين المخزن: يُسمح بالقيم السالبة فقط
+                if (!canIncreaseStock && Number(val) > 0) return;
+                setForm({...form, quantity_change: val});
+              }}
+            />
+            {!canIncreaseStock && (
+              <p className="text-xs text-orange-600 mt-1 font-bold">
+                <i className="fas fa-lock ml-1"></i>
+                صلاحيتك تسمح بتخفيض المخزون فقط (تلف / فقد / جرد).
+                لزيادة المخزون أنشئ <strong>أمر شراء</strong>.
+              </p>
+            )}
+          </Field>
+          <Field label="السبب">
+            <select className={INP} value={form.reason}
+              onChange={e=>setForm({...form,reason:e.target.value})}>
+              {Object.entries(reasonLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+            </select>
+          </Field>
+          <Field label="ملاحظات">
+            <input className={INP} placeholder="اختياري" value={form.notes}
+              onChange={e=>setForm({...form,notes:e.target.value})} />
+          </Field>
+        </div>
+        {/* ✅ تحذير لأمين المخزن */}
+        {!canIncreaseStock && (
+          <div className="mt-4 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 flex items-start gap-3">
+            <i className="fas fa-info-circle text-orange-500 mt-0.5 text-sm"></i>
+            <div>
+              <p className="text-sm font-bold text-orange-700">تسوية المخزون — صلاحية محدودة</p>
+              <p className="text-xs text-orange-600 mt-1">
+                يمكنك تسجيل <strong>تخفيض</strong> المخزون فقط (تلف / فقد / جرد دوري).<br/>
+                لزيادة المخزون اذهب إلى تبويب <strong>أوامر الشراء</strong> وأنشئ أمر شراء جديد.
+              </p>
+            </div>
+          </div>
+        )}
+        <button
+          onClick={handleSave}
+          disabled={saving || (!canIncreaseStock && Number(form.quantity_change) > 0)}
+          className={`mt-4 font-bold px-5 py-2 rounded-xl text-sm text-white transition
+            ${saving || (!canIncreaseStock && Number(form.quantity_change) > 0)
+              ? 'bg-gray-400 cursor-not-allowed'
+              : 'bg-blue-600 hover:bg-blue-700'}`}>
+          {saving ? '...' : 'تطبيق التسوية'}
+        </button>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b bg-gray-50 font-black text-gray-700">سجل التسويات</div>
+        <table className="w-full text-sm">
+          <thead><tr className="bg-gray-50 text-gray-500 text-right">
+            <th className="px-4 py-3 font-bold">المنتج</th>
+            <th className="px-4 py-3 font-bold">قبل</th>
+            <th className="px-4 py-3 font-bold">التغيير</th>
+            <th className="px-4 py-3 font-bold">بعد</th>
+            <th className="px-4 py-3 font-bold">السبب</th>
+            <th className="px-4 py-3 font-bold">الموظف</th>
+            <th className="px-4 py-3 font-bold">التاريخ</th>
+          </tr></thead>
+          <tbody>
+            {adjustments.length===0 && (
+              <tr><td colSpan={7} className="text-center py-8 text-gray-400">لا توجد تسويات</td></tr>
+            )}
+            {adjustments.map(a=>(
+              <tr key={a.id} className="border-t hover:bg-gray-50">
+                <td className="px-4 py-3 font-bold">{a.product_name}</td>
+                <td className="px-4 py-3">{a.quantity_before}</td>
+                <td className="px-4 py-3">
+                  <span className={`font-black ${a.quantity_change>=0?'text-green-600':'text-red-600'}`}>
+                    {a.quantity_change>=0?'+':''}{a.quantity_change}
+                  </span>
+                </td>
+                <td className="px-4 py-3 font-bold">{a.quantity_after}</td>
+                <td className="px-4 py-3">{a.reason_display}</td>
+                <td className="px-4 py-3 text-gray-500">{a.user_name||'—'}</td>
+                <td className="px-4 py-3 text-gray-500">{a.created_at?.split('T')[0]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Movements
+function MovementsPanel() {
+  const [movements, setMovements] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [filter, setFilter]       = useState('');
+  const [products, setProducts]   = useState([]);
+  const [selProduct, setSelProd]  = useState('');
+  const [toast, setToast]         = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (filter)     params.movement_type = filter;
+      if (selProduct) params.product       = selProduct;
+      const [mv, pr] = await Promise.all([
+        inventoryAPI.getMovements(params),
+        productsAPI.getAll({ page_size:200 }),
+      ]);
+      setMovements(mv.data?.results || mv.data || []);
+      setProducts(pr.data?.results  || pr.data  || []);
+    } catch {/**/ } finally { setLoading(false); }
+  }, [filter, selProduct]);
+
+  useEffect(()=>{ load(); }, [load]);
+
+  const typeLabels = {
+    '':'الكل', sale:'بيع', purchase:'شراء',
+    adjustment:'تسوية', return:'مرتجع', initial:'رصيد افتتاحي',
+  };
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div className="space-y-4">
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex gap-2 flex-wrap">
+          {Object.entries(typeLabels).map(([k,v])=>(
+            <button key={k} onClick={()=>setFilter(k)}
+              className={`px-3 py-1.5 rounded-xl text-sm font-bold ${
+                filter===k?'bg-blue-600 text-white':'bg-white border text-gray-600'
+              }`}>{v}</button>
+          ))}
+        </div>
+        <select className={INP+' w-48'} value={selProduct}
+          onChange={e=>setSelProd(e.target.value)}>
+          <option value="">كل المنتجات</option>
+          {products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b bg-gray-50 flex justify-between items-center">
+          <span className="font-black text-gray-700">سجل حركات المخزون</span>
+          <span className="text-sm text-gray-500">{movements.length} حركة</span>
+        </div>
+        <table className="w-full text-sm">
+          <thead><tr className="bg-gray-50 text-gray-500 text-right">
+            <th className="px-4 py-3 font-bold">المنتج</th>
+            <th className="px-4 py-3 font-bold">النوع</th>
+            <th className="px-4 py-3 font-bold">الكمية</th>
+            <th className="px-4 py-3 font-bold">قبل</th>
+            <th className="px-4 py-3 font-bold">بعد</th>
+            <th className="px-4 py-3 font-bold">المرجع</th>
+            <th className="px-4 py-3 font-bold">الموظف</th>
+            <th className="px-4 py-3 font-bold">التاريخ</th>
+          </tr></thead>
+          <tbody>
+            {movements.length===0 && (
+              <tr><td colSpan={8} className="text-center py-8 text-gray-400">
+                لا توجد حركات مخزون — ستظهر هنا عند اجراء عمليات بيع او شراء او تسوية
+              </td></tr>
+            )}
+            {movements.map(m=>(
+              <tr key={m.id} className="border-t hover:bg-gray-50">
+                <td className="px-4 py-3 font-bold">{m.product_name}</td>
+                <td className="px-4 py-3">
+                  <Badge label={m.movement_type_display} color={movementColor(m.movement_type)} />
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`font-black ${m.quantity>=0?'text-green-600':'text-red-600'}`}>
+                    {m.quantity>=0?'+':''}{m.quantity}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-gray-500">{m.stock_before}</td>
+                <td className="px-4 py-3 font-bold">{m.stock_after}</td>
+                <td className="px-4 py-3 text-blue-600 text-xs">{m.reference||'—'}</td>
+                <td className="px-4 py-3 text-gray-500">{m.user_name||'—'}</td>
+                <td className="px-4 py-3 text-gray-500">{m.created_at?.split('T')[0]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════
+//  AlertsPanel — Ticket System
+// ══════════════════════════════════════════════════════
+
+// ── ألوان الأولوية ────────────────────────────────────
+const priorityConfig = {
+  low:      { label: 'منخفضة',  color: 'bg-gray-100  text-gray-600',   dot: 'bg-gray-400'   },
+  medium:   { label: 'متوسطة',  color: 'bg-blue-100  text-blue-700',   dot: 'bg-blue-500'   },
+  high:     { label: 'عالية',   color: 'bg-orange-100 text-orange-700', dot: 'bg-orange-500' },
+  critical: { label: 'حرجة',    color: 'bg-red-100   text-red-700',    dot: 'bg-red-500'    },
+};
+
+// ── ألوان حالة التذكرة ────────────────────────────────
+const ticketStatusConfig = {
+  open:        { label: 'مفتوحة',        color: 'bg-red-100    text-red-700'    },
+  in_progress: { label: 'قيد المعالجة', color: 'bg-yellow-100 text-yellow-700' },
+  ordered:     { label: 'تم الطلب',      color: 'bg-blue-100   text-blue-700'   },
+  resolved:    { label: 'محلولة',        color: 'bg-green-100  text-green-700'  },
+};
+
+// ── ألوان نوع الملاحظة ────────────────────────────────
+const noteTypeConfig = {
+  note:   { label: 'ملاحظة',      icon: '📝', color: 'border-gray-200   bg-gray-50'    },
+  quote:  { label: 'عرض سعر',    icon: '💰', color: 'border-green-200  bg-green-50'   },
+  action: { label: 'إجراء',       icon: '⚡', color: 'border-blue-200   bg-blue-50'    },
+  delay:  { label: 'سبب تأخير',  icon: '⏰', color: 'border-orange-200 bg-orange-50'  },
+  system: { label: 'تحديث نظام', icon: '🔧', color: 'border-purple-200 bg-purple-50'  },
+};
+
+// ── مكوّن بطاقة التذكرة في القائمة ───────────────────
+function AlertCard({ alert, onOpen }) {
+  const pr = priorityConfig[alert.priority]  || priorityConfig.medium;
+  const st = ticketStatusConfig[alert.ticket_status] || ticketStatusConfig.open;
+  const isOverdue = alert.deadline && !alert.is_resolved && new Date(alert.deadline) < new Date();
+
+  return (
+    <div
+      onClick={() => onOpen(alert)}
+      className={`bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:shadow-md transition-all
+        ${alert.is_resolved ? 'opacity-60' : ''}
+        ${isOverdue ? 'border-red-400 ring-1 ring-red-300' : 'border-gray-200'}`}
+    >
+      {/* رأس البطاقة */}
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${pr.dot}`}></span>
+            <span className="font-black text-gray-800 text-sm truncate">{alert.product_name}</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${st.color}`}>
+              {st.label}
+            </span>
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${pr.color}`}>
+              {pr.label}
+            </span>
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full
+              ${alert.alert_type === 'out' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+              {alert.alert_type === 'out' ? '🚨 نفاد' : '⚠️ منخفض'}
+            </span>
+          </div>
+        </div>
+        {/* المخزون الحالي */}
+        <div className="text-center flex-shrink-0">
+          <div className={`text-2xl font-black ${alert.product_current_stock === 0 ? 'text-red-600' : 'text-orange-500'}`}>
+            {alert.product_current_stock ?? alert.current_stock}
+          </div>
+          <div className="text-xs text-gray-400">وحدة</div>
+        </div>
+      </div>
+
+      {/* معلومات إضافية */}
+      <div className="flex items-center justify-between text-xs text-gray-500">
+        <div className="flex items-center gap-3">
+          {alert.notes_count > 0 && (
+            <span className="flex items-center gap-1">
+              💬 <span className="font-bold">{alert.notes_count}</span>
+            </span>
+          )}
+          {alert.linked_po_reference && (
+            <span className="flex items-center gap-1 text-blue-600 font-bold">
+              📦 {alert.linked_po_reference}
+            </span>
+          )}
+          {isOverdue && (
+            <span className="text-red-600 font-bold flex items-center gap-1">
+              ⏰ متأخرة
+            </span>
+          )}
+        </div>
+        <span>{alert.created_at?.split('T')[0]}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── مكوّن التذكرة الكاملة (Modal) ────────────────────
+function AlertTicketModal({ alert: initialAlert, suppliers, onClose, onUpdated }) {
+  const [alert,        setAlert]       = useState(initialAlert);
+  const [loading,      setLoading]     = useState(false);
+  const [noteForm,     setNoteForm]    = useState({
+    note_type: 'note', text: '', cost: '', expected_date: '', delay_reason: '', supplier_name: '',
+  });
+  const [poForm,       setPoForm]      = useState({
+    supplier: '', quantity: 1, unit_cost: '', expected_date: '', notes: '',
+  });
+  const [activeSection, setSection]   = useState('notes'); // notes | create_po | resolve
+  const [resolveNote,   setResolveNote] = useState('');
+  const [toast,         setToast]      = useState(null);
+  const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),4000); };
+
+  const reload = async () => {
+    try {
+      const r = await inventoryAPI.getAlert(alert.id);
+      setAlert(r.data);
+      onUpdated();
+    } catch {/* */}
+  };
+
+  // ── إضافة ملاحظة ────────────────────────────────────
+  const handleAddNote = async () => {
+    if (!noteForm.text.trim()) { notify('اكتب النص أولاً', 'error'); return; }
+    setLoading(true);
+    try {
+      await inventoryAPI.addAlertNote(alert.id, {
+        note_type:     noteForm.note_type,
+        text:          noteForm.text,
+        cost:          noteForm.cost          || null,
+        expected_date: noteForm.expected_date || null,
+        delay_reason:  noteForm.delay_reason  || '',
+        supplier_name: noteForm.supplier_name || '',
+      });
+      notify('✅ تم إضافة الملاحظة');
+      setNoteForm({ note_type:'note', text:'', cost:'', expected_date:'', delay_reason:'', supplier_name:'' });
+      reload();
+    } catch(e) {
+      notify('❌ ' + (e?.response?.data?.error || 'خطأ'), 'error');
+    } finally { setLoading(false); }
+  };
+
+  // ── إنشاء أمر شراء ──────────────────────────────────
+  const handleCreatePO = async () => {
+    if (!poForm.quantity || !poForm.unit_cost) {
+      notify('أدخل الكمية والتكلفة', 'error'); return;
+    }
+    setLoading(true);
+    try {
+      const r = await inventoryAPI.createPoFromAlert(alert.id, {
+        supplier:      poForm.supplier      || null,
+        quantity:      Number(poForm.quantity),
+        unit_cost:     Number(poForm.unit_cost),
+        expected_date: poForm.expected_date || null,
+        notes:         poForm.notes         || '',
+      });
+      notify('✅ تم إنشاء أمر الشراء: ' + r.data.purchase_order.reference_number);
+      setSection('notes');
+      reload();
+    } catch(e) {
+      notify('❌ ' + (e?.response?.data?.error || 'خطأ'), 'error');
+    } finally { setLoading(false); }
+  };
+
+  // ── حل التذكرة ──────────────────────────────────────
+  const handleResolve = async () => {
+    setLoading(true);
+    try {
+      await inventoryAPI.resolveAlert(alert.id, { note: resolveNote });
+      notify('✅ تم حل التذكرة');
+      reload();
+      setTimeout(onClose, 1500);
+    } catch(e) {
+      notify('❌ ' + (e?.response?.data?.error || 'خطأ'), 'error');
+    } finally { setLoading(false); }
+  };
+
+  const pr = priorityConfig[alert.priority]          || priorityConfig.medium;
+  const st = ticketStatusConfig[alert.ticket_status] || ticketStatusConfig.open;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {toast && (
+          <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-10 px-5 py-3 rounded-2xl shadow-xl font-bold text-sm
+            ${toast.type==='error'?'bg-red-600 text-white':'bg-green-600 text-white'}`}>
+            {toast.msg}
+          </div>
+        )}
+
+        {/* ── رأس التذكرة ── */}
+        <div className="px-5 py-4 border-b flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`w-3 h-3 rounded-full ${pr.dot}`}></span>
+              <h2 className="font-black text-gray-800 text-lg">{alert.product_name}</h2>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${st.color}`}>{st.label}</span>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${pr.color}`}>{pr.label}</span>
+            </div>
+            <div className="flex flex-wrap gap-3 mt-2 text-sm text-gray-500">
+              <span>📦 باركود: <strong>{alert.product_barcode || '—'}</strong></span>
+              <span>📊 المخزون الحالي: <strong className="text-red-600">{alert.product_current_stock ?? alert.current_stock}</strong></span>
+              <span>🎯 الحد: <strong>{alert.threshold}</strong></span>
+              {alert.linked_po_reference && (
+                <span className="text-blue-600 font-bold">
+                  🔗 PO: {alert.linked_po_reference}
+                  <span className={`mr-1 text-xs px-1.5 py-0.5 rounded ${
+                    alert.linked_po_status==='received'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'
+                  }`}>{alert.linked_po_status}</span>
+                </span>
+              )}
+              {alert.deadline && (
+                <span className={new Date(alert.deadline)<new Date()&&!alert.is_resolved?'text-red-600 font-bold':''}>
+                  ⏰ الموعد النهائي: {alert.deadline}
+                </span>
+              )}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl font-black flex-shrink-0">✕</button>
+        </div>
+
+        {/* ── محتوى التذكرة ── */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+          {/* ── Timeline الملاحظات ── */}
+          <div>
+            <h3 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2">
+              💬 سجل التذكرة
+              <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full font-bold">
+                {alert.notes?.length || 0}
+              </span>
+            </h3>
+            {(!alert.notes || alert.notes.length === 0) && (
+              <div className="text-center py-6 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                <p className="text-2xl mb-1">📭</p>
+                <p className="text-sm">لا توجد ملاحظات بعد — ابدأ بإضافة أول ملاحظة</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              {(alert.notes || []).map(note => {
+                const nc = noteTypeConfig[note.note_type] || noteTypeConfig.note;
+                return (
+                  <div key={note.id} className={`rounded-xl border p-3 ${nc.color}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{nc.icon}</span>
+                        <span className="text-xs font-bold text-gray-600">{nc.label}</span>
+                        <span className="text-xs text-gray-400">— {note.user_name || 'النظام'}</span>
+                      </div>
+                      <span className="text-xs text-gray-400">{note.created_at?.split('T')[0]}</span>
+                    </div>
+                    <p className="text-sm text-gray-700 font-medium">{note.text}</p>
+                    {note.cost && (
+                      <p className="text-xs text-green-700 font-bold mt-1">💵 التكلفة: {Number(note.cost).toFixed(2)} ج</p>
+                    )}
+                    {note.expected_date && (
+                      <p className="text-xs text-blue-700 font-bold mt-1">📅 تاريخ الاستلام: {note.expected_date}</p>
+                    )}
+                    {note.delay_reason && (
+                      <p className="text-xs text-orange-700 mt-1">⏰ سبب التأخير: {note.delay_reason}</p>
+                    )}
+                    {note.supplier_name && (
+                      <p className="text-xs text-purple-700 mt-1">🏭 المورد: {note.supplier_name}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── اختيار الإجراء ── */}
+          {!alert.is_resolved && (
+            <div>
+              <div className="flex gap-2 flex-wrap mb-3">
+                {[
+                  { key:'notes',     label:'💬 إضافة ملاحظة' },
+                  { key:'create_po', label:'📦 إنشاء أمر شراء', disabled: !!alert.linked_po },
+                  { key:'resolve',   label:'✅ حل التذكرة'     },
+                ].map(s => (
+                  <button
+                    key={s.key}
+                    onClick={() => !s.disabled && setSection(s.key)}
+                    disabled={s.disabled}
+                    className={`px-3 py-1.5 rounded-xl text-sm font-bold transition
+                      ${s.disabled ? 'bg-gray-100 text-gray-400 cursor-not-allowed' :
+                        activeSection===s.key ? 'bg-blue-600 text-white shadow' :
+                        'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                    {s.label}
+                    {s.key==='create_po' && alert.linked_po && <span className="mr-1 text-xs opacity-70">(مرتبط)</span>}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── فورم الملاحظة ── */}
+              {activeSection === 'notes' && (
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-gray-500 block mb-1">نوع الملاحظة</label>
+                      <select className={INP} value={noteForm.note_type}
+                        onChange={e=>setNoteForm({...noteForm,note_type:e.target.value})}>
+                        <option value="note">📝 ملاحظة عامة</option>
+                        <option value="quote">💰 عرض سعر</option>
+                        <option value="action">⚡ إجراء مُتخذ</option>
+                        <option value="delay">⏰ سبب تأخير</option>
+                      </select>
+                    </div>
+                    {noteForm.note_type === 'quote' && (
+                      <div>
+                        <label className="text-xs font-bold text-gray-500 block mb-1">التكلفة / السعر</label>
+                        <input type="number" step="0.01" className={INP} placeholder="0.00"
+                          value={noteForm.cost} onChange={e=>setNoteForm({...noteForm,cost:e.target.value})} />
+                      </div>
+                    )}
+                    {(noteForm.note_type === 'quote' || noteForm.note_type === 'action') && (
+                      <div>
+                        <label className="text-xs font-bold text-gray-500 block mb-1">تاريخ الاستلام المتوقع</label>
+                        <input type="date" className={INP}
+                          value={noteForm.expected_date}
+                          onChange={e=>setNoteForm({...noteForm,expected_date:e.target.value})} />
+                      </div>
+                    )}
+                    {noteForm.note_type === 'quote' && (
+                      <div>
+                        <label className="text-xs font-bold text-gray-500 block mb-1">اسم المورد</label>
+                        <input type="text" className={INP} placeholder="اسم المورد"
+                          value={noteForm.supplier_name}
+                          onChange={e=>setNoteForm({...noteForm,supplier_name:e.target.value})} />
+                      </div>
+                    )}
+                    {noteForm.note_type === 'delay' && (
+                      <div className="col-span-2">
+                        <label className="text-xs font-bold text-gray-500 block mb-1">سبب التأخير</label>
+                        <input type="text" className={INP} placeholder="اذكر سبب التأخير..."
+                          value={noteForm.delay_reason}
+                          onChange={e=>setNoteForm({...noteForm,delay_reason:e.target.value})} />
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 block mb-1">النص <span className="text-red-500">*</span></label>
+                    <textarea rows={3} className={INP+' resize-none'} placeholder="اكتب ملاحظتك هنا..."
+                      value={noteForm.text}
+                      onChange={e=>setNoteForm({...noteForm,text:e.target.value})} />
+                  </div>
+                  <button onClick={handleAddNote} disabled={loading}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-sm disabled:opacity-50 transition">
+                    {loading ? '...' : 'إضافة الملاحظة'}
+                  </button>
+                </div>
+              )}
+
+              {/* ── فورم إنشاء أمر الشراء ── */}
+              {activeSection === 'create_po' && !alert.linked_po && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+                  <h4 className="font-bold text-blue-800 text-sm">📦 إنشاء أمر شراء لـ: {alert.product_name}</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-gray-500 block mb-1">المورد</label>
+                      <select className={INP} value={poForm.supplier}
+                        onChange={e=>setPoForm({...poForm,supplier:e.target.value})}>
+                        <option value="">— بدون مورد —</option>
+                        {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-gray-500 block mb-1">الكمية المطلوبة <span className="text-red-500">*</span></label>
+                      <input type="number" min={1} className={INP}
+                        value={poForm.quantity}
+                        onChange={e=>setPoForm({...poForm,quantity:e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-gray-500 block mb-1">تكلفة الوحدة <span className="text-red-500">*</span></label>
+                      <input type="number" step="0.01" min={0} className={INP} placeholder="0.00"
+                        value={poForm.unit_cost}
+                        onChange={e=>setPoForm({...poForm,unit_cost:e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-gray-500 block mb-1">تاريخ الاستلام المتوقع</label>
+                      <input type="date" className={INP}
+                        value={poForm.expected_date}
+                        onChange={e=>setPoForm({...poForm,expected_date:e.target.value})} />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-xs font-bold text-gray-500 block mb-1">ملاحظات</label>
+                      <input type="text" className={INP} placeholder="ملاحظات اختيارية..."
+                        value={poForm.notes}
+                        onChange={e=>setPoForm({...poForm,notes:e.target.value})} />
+                    </div>
+                  </div>
+                  <button onClick={handleCreatePO} disabled={loading}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-sm disabled:opacity-50 transition">
+                    {loading ? '...' : 'إنشاء أمر الشراء وربطه بالتذكرة'}
+                  </button>
+                </div>
+              )}
+
+              {/* ── فورم الحل ── */}
+              {activeSection === 'resolve' && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-3">
+                  <h4 className="font-bold text-green-800 text-sm">✅ حل التذكرة</h4>
+                  {alert.linked_po && alert.linked_po_status !== 'received' && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-sm text-orange-700 font-bold">
+                      ⚠️ أمر الشراء #{alert.linked_po_reference} لم يُستلم بعد.
+                      استلم البضاعة أولاً من تبويب أوامر الشراء.
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 block mb-1">ملاحظة الحل (اختياري)</label>
+                    <textarea rows={2} className={INP+' resize-none'} placeholder="سبب الحل أو ملاحظة ختامية..."
+                      value={resolveNote} onChange={e=>setResolveNote(e.target.value)} />
+                  </div>
+                  <button
+                    onClick={handleResolve}
+                    disabled={loading || (alert.linked_po && alert.linked_po_status !== 'received')}
+                    className="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-xl text-sm disabled:opacity-50 transition">
+                    {loading ? '...' : 'تأكيد الحل'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* رسالة للتذكرة المحلولة */}
+          {alert.is_resolved && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
+              <div className="text-3xl mb-1">✅</div>
+              <p className="font-bold text-green-700">تم حل هذه التذكرة</p>
+              {alert.resolved_at && (
+                <p className="text-xs text-green-600 mt-1">{alert.resolved_at?.split('T')[0]}</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── footer ── */}
+        <div className="px-5 py-3 border-t bg-gray-50 flex justify-end">
+          <button onClick={onClose}
+            className="px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm text-gray-600 hover:bg-gray-100 transition">
+            إغلاق
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── AlertsPanel الرئيسي ───────────────────────────────
+function AlertsPanel() {
+  const [alerts,    setAlerts]    = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [filter,    setFilter]    = useState('active');
+  const [priority,  setPriority]  = useState('');
+  const [selected,  setSelected]  = useState(null);
+  const [toast,     setToast]     = useState(null);
+  const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (filter === 'active')   params.is_resolved = 'false';
+      if (filter === 'resolved') params.is_resolved = 'true';
+      if (priority) params.priority = priority;
+      const [ar, sr] = await Promise.all([
+        inventoryAPI.getAlerts(params),
+        inventoryAPI.getSuppliers(),
+      ]);
+      setAlerts(ar.data?.results || ar.data || []);
+      setSuppliers(sr.data?.results || sr.data || []);
+    } catch {/* */} finally { setLoading(false); }
+  }, [filter, priority]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const stats = {
+    total:    alerts.length,
+    critical: alerts.filter(a => a.priority === 'critical').length,
+    high:     alerts.filter(a => a.priority === 'high').length,
+    ordered:  alerts.filter(a => a.ticket_status === 'ordered').length,
+  };
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div className="space-y-5">
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+
+      {/* ── Stats ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label:'إجمالي التنبيهات', value: stats.total,    color:'bg-gray-100   text-gray-700',   icon:'🔔' },
+          { label:'حرجة',             value: stats.critical, color:'bg-red-100    text-red-700',    icon:'🚨' },
+          { label:'عالية الأولوية',   value: stats.high,     color:'bg-orange-100 text-orange-700', icon:'⚠️' },
+          { label:'قيد الطلب',        value: stats.ordered,  color:'bg-blue-100   text-blue-700',   icon:'📦' },
+        ].map(s => (
+          <div key={s.label} className={`rounded-2xl p-4 ${s.color}`}>
+            <div className="text-2xl mb-1">{s.icon}</div>
+            <div className="text-2xl font-black">{s.value}</div>
+            <div className="text-xs font-semibold mt-0.5">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── الفلاتر ── */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <div className="flex gap-2">
+          {['all','active','resolved'].map(f => (
+            <button key={f} onClick={() => setFilter(f)}
+              className={`px-3 py-1.5 rounded-xl text-sm font-bold ${
+                filter===f?'bg-blue-600 text-white shadow':'bg-white border text-gray-600 hover:bg-gray-50'}`}>
+              {f==='all'?'الكل':f==='active'?'🔔 نشطة':'✅ محلولة'}
+            </button>
+          ))}
+        </div>
+        <select className={INP+' w-36'} value={priority} onChange={e=>setPriority(e.target.value)}>
+          <option value="">كل الأولويات</option>
+          <option value="critical">🚨 حرجة</option>
+          <option value="high">⚠️ عالية</option>
+          <option value="medium">🔵 متوسطة</option>
+          <option value="low">⬇️ منخفضة</option>
+        </select>
+        <button onClick={async () => {
+          try {
+            const r = await inventoryAPI.checkAndGenerateAlerts({ threshold:10 });
+            notify(`تم إنشاء ${r.data.created_alerts} تنبيه جديد`);
+            load();
+          } catch { notify('خطأ في توليد التنبيهات','error'); }
+        }} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-3 py-1.5 rounded-xl text-sm transition">
+          🔄 فحص وتحديث
+        </button>
+      </div>
+
+      {/* ── شبكة التذاكر ── */}
+      {alerts.length === 0 ? (
+        <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border">
+          <div className="text-5xl mb-3">🎉</div>
+          <p className="font-bold text-lg">لا توجد تنبيهات {filter==='active'?'نشطة':''}!</p>
+          <p className="text-sm mt-1">المخزون في حالة جيدة</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {alerts.map(a => (
+            <AlertCard key={a.id} alert={a} onOpen={setSelected} />
+          ))}
+        </div>
+      )}
+
+      {/* ── التذكرة الكاملة ── */}
+      {selected && (
+        <AlertTicketModal
+          alert={selected}
+          suppliers={suppliers}
+          onClose={() => setSelected(null)}
+          onUpdated={() => { load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Suppliers
+function SuppliersPanel() {
+  const [suppliers, setSuppliers] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [showForm, setShowForm]   = useState(false);
+  const [editing, setEditing]     = useState(null);
+  const [toast, setToast]         = useState(null);
+  const notify = (msg,type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await inventoryAPI.getSuppliers();
+      setSuppliers(r.data?.results||r.data||[]);
+    } catch {/**/ } finally { setLoading(false); }
+  }, []);
+
+  useEffect(()=>{ load(); }, [load]);
+
+  const handleSave = async (data) => {
+    try {
+      if (editing) await inventoryAPI.updateSupplier(editing.id, data);
+      else         await inventoryAPI.createSupplier(data);
+      notify('تم الحفظ');
+      setShowForm(false); setEditing(null); load();
+    } catch(e) { notify('خطأ: '+JSON.stringify(e?.response?.data||'خطأ'),'error'); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('حذف المورد؟')) return;
+    try { await inventoryAPI.deleteSupplier(id); notify('تم الحذف'); load(); }
+    catch { notify('خطأ في الحذف','error'); }
+  };
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div className="space-y-4">
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+      <div className="flex justify-between items-center">
+        <h2 className="font-black text-gray-700 text-lg">الموردون</h2>
+        <button onClick={()=>{ setEditing(null); setShowForm(true); }}
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-sm">
+          مورد جديد
+        </button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {suppliers.length===0 && <p className="text-gray-400 col-span-3 text-center py-8">لا يوجد موردون</p>}
+        {suppliers.map(s=>(
+          <div key={s.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+            <div className="flex justify-between items-start">
+              <div>
+                <div className="font-black text-gray-800">{s.name}</div>
+                {s.phone && <div className="text-sm text-gray-500 mt-1">📞 {s.phone}</div>}
+                {s.email && <div className="text-sm text-gray-500">✉️ {s.email}</div>}
+                <div className="text-xs text-blue-600 mt-2 font-bold">{s.orders_count} اوامر شراء</div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={()=>{ setEditing(s); setShowForm(true); }} className="text-blue-500 hover:text-blue-700 text-sm">✏️</button>
+                <button onClick={()=>handleDelete(s.id)} className="text-red-400 hover:text-red-600 text-sm">🗑️</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {showForm && (
+        <SupplierModal initial={editing}
+          onClose={()=>{ setShowForm(false); setEditing(null); }}
+          onSave={handleSave} />
+      )}
+    </div>
+  );
+}
+
+function SupplierModal({ initial, onClose, onSave }) {
+  const [form, setForm] = useState({ name:'', phone:'', email:'', address:'', notes:'', ...initial });
+  const [saving, setSaving] = useState(false);
+  const handle = async () => { setSaving(true); await onSave(form); setSaving(false); };
+  return (
+    <Modal title={initial?'تعديل المورد':'مورد جديد'} onClose={onClose}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="الاسم *"><input className={INP} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} /></Field>
+          <Field label="الهاتف"><input className={INP} value={form.phone||''} onChange={e=>setForm({...form,phone:e.target.value})} /></Field>
+          <Field label="البريد الالكتروني"><input className={INP} value={form.email||''} onChange={e=>setForm({...form,email:e.target.value})} /></Field>
+          <Field label="العنوان"><input className={INP} value={form.address||''} onChange={e=>setForm({...form,address:e.target.value})} /></Field>
+        </div>
+        <Field label="ملاحظات"><textarea className={INP} rows={2} value={form.notes||''} onChange={e=>setForm({...form,notes:e.target.value})} /></Field>
+        <div className="flex gap-3 justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">الغاء</button>
+          <button onClick={handle} disabled={saving} className="bg-blue-600 text-white font-bold px-5 py-2 rounded-xl text-sm">{saving?'...':'حفظ'}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Quick Order Modal
+function QuickOrderModal({ product, suppliers, onClose, onSaved, onError }) {
+  const [form, setForm] = useState({
+    reference_number: `PO-${Date.now()}`,
+    supplier: '', expected_date: '', notes: '', status: 'ordered',
+  });
+  const [quantity,  setQuantity] = useState(10);
+  const [unit_cost, setUnitCost] = useState(product.cost || '');
+  const [saving,    setSaving]   = useState(false);
+
+  const handleSave = async () => {
+    if (!quantity || Number(quantity) <= 0) return onError('الكمية يجب ان تكون اكبر من صفر');
+    if (!unit_cost || Number(unit_cost) <= 0) return onError('ادخل تكلفة الوحدة');
+    setSaving(true);
+    try {
+      await inventoryAPI.createPurchaseOrder({
+        ...form,
+        supplier: form.supplier || null,
+        items: [{ product: product.id, quantity: Number(quantity), unit_cost: Number(unit_cost) }],
+      });
+      onSaved();
+    } catch(e) {
+      onError(JSON.stringify(e?.response?.data || 'خطأ'));
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal title={`طلب شراء سريع`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 flex items-center gap-3">
+          <div className="text-3xl">⚠️</div>
+          <div>
+            <div className="font-black text-gray-800">{product.name}</div>
+            <div className="text-sm text-gray-500 mt-0.5">
+              الباركود: {product.barcode||'—'} | المخزون الحالي:&nbsp;
+              <span className={`font-black ${product.stock===0?'text-red-600':'text-yellow-600'}`}>{product.stock}</span>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="رقم المرجع *">
+            <input className={INP} value={form.reference_number} onChange={e=>setForm({...form,reference_number:e.target.value})} />
+          </Field>
+          <Field label="المورد">
+            <select className={INP} value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}>
+              <option value="">بدون مورد</option>
+              {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+          <Field label="الكمية المطلوبة *">
+            <input type="number" min={1} className={INP} value={quantity} onChange={e=>setQuantity(e.target.value)} />
+          </Field>
+          <Field label="تكلفة الوحدة *">
+            <input type="number" min={0} step="0.01" className={INP} value={unit_cost} onChange={e=>setUnitCost(e.target.value)} />
+          </Field>
+          <Field label="تاريخ الاستلام المتوقع">
+            <input type="date" className={INP} value={form.expected_date} onChange={e=>setForm({...form,expected_date:e.target.value})} />
+          </Field>
+          <Field label="الحالة">
+            <select className={INP} value={form.status} onChange={e=>setForm({...form,status:e.target.value})}>
+              <option value="draft">مسودة</option>
+              <option value="ordered">تم الطلب</option>
+            </select>
+          </Field>
+        </div>
+        <Field label="ملاحظات">
+          <textarea className={INP} rows={2} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} />
+        </Field>
+        <div className="bg-blue-50 rounded-xl p-3 text-sm font-bold text-blue-700">
+          الاجمالي المتوقع: {fmt(Number(quantity||0) * Number(unit_cost||0))} ج
+        </div>
+        <div className="flex gap-3 justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl border font-bold text-sm">الغاء</button>
+          <button onClick={handleSave} disabled={saving}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2 rounded-xl text-sm">
+            {saving?'...':'حفظ الطلب'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
