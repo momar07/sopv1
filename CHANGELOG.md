@@ -4,7 +4,7 @@
 
 ---
 
-## [2026-03-08 19:23] fix uom ui 1
+## [2026-03-08 19:54] fix product edit
 
 
 
@@ -59,3 +59,22 @@
 - أضفنا unitsAPI في api.js: getAll, getOne, create, update, delete, setUnitPrices
 - أضفنا UomPricesTab.jsx: تبويب الوحدات والأسعار داخل ProductModal
 
+
+## [2026-03-08 19:28] fix_products_uom
+- أضفنا unitsAPI في api.js
+- أضفنا تبويب 'الوحدات والأسعار' في ProductModal
+- أضفنا عمود 'الوحدة' في جدول المنتجات
+- أضفنا حقل min_stock في تبويب التسعير
+- السكريبت يكتب كل حاجة لوحده بدون خطوات يدوية
+
+## [2026-03-08 19:39] fix_add_uom_page
+- أضفنا UnitsOfMeasure.jsx: إدارة كاملة لوحدات القياس
+- أضفنا seed_ui_uom.py: route /units + menu item + actions
+
+
+## [2026-03-08 19:53] fix_products_edit
+- Fix: اختفاء البيانات عند التعديل (category, cost, base_unit, purchase_unit, min_stock)
+- السبب: ProductListSerializer مش فيه كل الحقول
+- الحل: productsAPI.getOne(id) داخل ProductModal عند فتح التعديل
+- أضفنا loading spinner أثناء جلب البيانات الكاملة
+- أضفنا تبويب الوحدات والأسعار + unitsAPI

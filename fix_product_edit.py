@@ -1,4 +1,27 @@
+# fix_products_edit.py
+"""
+يُصلح مشكلة اختفاء البيانات عند التعديل في Products.jsx
+السبب: الجدول بيستخدم ProductListSerializer (مش فيه cost/category UUID)
+الحل: عند الضغط على تعديل، نجيب المنتج كامل من GET /api/products/:id/
+"""
+import os, shutil, datetime
 
+BASE     = "/home/momar/Projects/POS_DEV/posv1_dev10"
+PRODUCTS = os.path.join(BASE, "pos_frontend/src/pages/Products.jsx")
+CHLOG    = os.path.join(BASE, "CHANGELOG.md")
+
+def backup(path):
+    if os.path.exists(path):
+        shutil.copy2(path, path + ".bak")
+        print(f"  ✅ Backup: {path}.bak")
+
+def write_file(path, content):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"  ✅ Written: {path}")
+
+PRODUCTS_JSX = r"""
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { productsAPI, categoriesAPI, unitsAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -858,3 +881,32 @@ const Products = () => {
 };
 
 export default Products;
+"""
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+print("="*60)
+print("  fix_products_edit.py — إصلاح اختفاء البيانات عند التعديل")
+print("="*60)
+print()
+print("  السبب: ProductListSerializer مش فيه cost/category UUID")
+print("  الحل:  عند فتح modal التعديل، نجيب GET /api/products/:id/")
+print("         اللي بيرجع ProductSerializer الكامل")
+print()
+
+backup(PRODUCTS)
+write_file(PRODUCTS, PRODUCTS_JSX)
+
+ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+with open(CHLOG, "a", encoding="utf-8") as f:
+    f.write(
+        f"\n## [{ts}] fix_products_edit\n"
+        "- Fix: اختفاء البيانات عند التعديل (category, cost, base_unit, purchase_unit, min_stock)\n"
+        "- السبب: ProductListSerializer مش فيه كل الحقول\n"
+        "- الحل: productsAPI.getOne(id) داخل ProductModal عند فتح التعديل\n"
+        "- أضفنا loading spinner أثناء جلب البيانات الكاملة\n"
+        "- أضفنا تبويب الوحدات والأسعار + unitsAPI\n"
+    )
+print("  ✅ CHANGELOG updated")
+print()
+print("✅ تم! شغّل:")
+print("   python3 fix_products_edit.py")
