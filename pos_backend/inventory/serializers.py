@@ -144,7 +144,7 @@ class StockAlertNoteSerializer(serializers.ModelSerializer):
             'cost', 'expected_date', 'delay_reason', 'supplier_name',
             'created_at',
         ]
-        read_only_fields = ['user', 'created_at']
+        read_only_fields = ['alert', 'user', 'created_at']
 
 class StockAlertSerializer(serializers.ModelSerializer):
     product_name          = serializers.CharField(source='product.name',               read_only=True)
