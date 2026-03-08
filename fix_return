@@ -1,0 +1,15 @@
+ملخص التغييرات:
+  Backend:
+  ✅ superuser يشوف كل المرتجعات بدون فلتر
+  ✅ stats يطبق RBAC scope
+  ✅ debug prints اتشالت
+  ✅ المرتجع يبدأ بـ pending دايماً
+  ✅ المخزون يتغير فقط عند complete()
+  ✅ endpoints جديدة: approve / complete / reject
+
+  Frontend:
+  ✅ زرار المرتجع يظهر لمن عنده صلاحية فقط
+  ✅ workflow كامل: pending → approved → completed
+  ✅ أزرار الموافقة/الإكمال/الرفض للمدير فقط
+  ✅ رسالة توضيحية إن المرتجع يحتاج موافقة
+

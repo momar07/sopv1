@@ -150,20 +150,29 @@ class SaleSerializer(serializers.ModelSerializer):
 
 class SaleListSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source='customer.name', read_only=True)
-    user_name = serializers.SerializerMethodField()
-    items_count = serializers.ReadOnlyField()
+    user_name     = serializers.SerializerMethodField()
+    items_count   = serializers.ReadOnlyField()
+    has_returns   = serializers.SerializerMethodField()
+    returns_count = serializers.SerializerMethodField()
 
     class Meta:
-        model = Sale
+        model  = Sale
         fields = [
-            'id', 'customer_name', 'user_name', 'total',
-            'payment_method', 'status', 'items_count', 'created_at'
+            'id', 'invoice_number', 'customer_name', 'user_name',
+            'total', 'payment_method', 'status',
+            'items_count', 'has_returns', 'returns_count', 'created_at'
         ]
 
     def get_user_name(self, obj):
         if obj.user:
             return obj.user.get_full_name() or obj.user.username
         return 'غير محدد'
+
+    def get_has_returns(self, obj):
+        return obj.returns.exists()
+
+    def get_returns_count(self, obj):
+        return obj.returns.count()
 
 
 class SalesStatsSerializer(serializers.Serializer):

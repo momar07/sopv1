@@ -21,7 +21,7 @@ class SaleViewSet(viewsets.ModelViewSet):
     serializer_class = SaleSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'payment_method', 'customer']
-    search_fields = ['customer__name', 'id']
+    search_fields = ['customer__name', 'invoice_number', 'user__username', 'user__first_name', 'user__last_name']
     ordering_fields = ['created_at', 'total']
     ordering = ['-created_at']
 
