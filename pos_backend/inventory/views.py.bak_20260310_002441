@@ -236,17 +236,10 @@ class StockAlertViewSet(viewsets.ModelViewSet):
                 'checked_products': products.count(),
             })
 
-        # ── حماية: لو bulk_mode لكن product_ids فارغ ──
-        if bulk_mode:
-            return Response({'created_alerts': 0, 'message': 'bulk_mode يتطلب product_ids'})
-
-        # الوضع العادي — تنبيه لكل منتج (بدون bulk_mode)
+        # الوضع العادي — تنبيه لكل منتج
         created = 0
         for product in products:
-            # تخطى لو في تنبيه مفتوح (فردي أو مجمع) يحتوي هذا المنتج
             if StockAlert.objects.filter(product=product, is_resolved=False).exists():
-                continue
-            if StockAlertItem.objects.filter(product=product, alert__is_resolved=False).exists():
                 continue
             if product.stock == 0:
                 alert = StockAlert.objects.create(
@@ -448,30 +441,6 @@ class StockAlertViewSet(viewsets.ModelViewSet):
                 {'id': str(p.id), 'reference_number': p.reference_number, 'total_cost': str(p.total_cost)}
                 for p in created_pos
             ],
-        })
-
-    @action(detail=True, methods=['post'])
-    def add_urgency_note(self, request, pk=None):
-        """إضافة ملاحظة استعجال على التنبيه"""
-        alert = self.get_object()
-        if alert.is_resolved:
-            return Response({'error': 'التذكرة محلولة'}, status=status.HTTP_400_BAD_REQUEST)
-        user = request.user
-        with transaction.atomic():
-            note = StockAlertNote.objects.create(
-                alert=alert,
-                user=user,
-                note_type='system',
-                text='🚨 طلب استعجال من: ' + user.get_full_name() or user.username,
-            )
-            # تصعيد الأولوية تلقائياً
-            priority_map = {'low': 'medium', 'medium': 'high', 'high': 'critical', 'critical': 'critical'}
-            new_priority = priority_map.get(alert.priority, 'high')
-            alert.priority = new_priority
-            alert.save(update_fields=['priority'])
-        return Response({
-            'alert':   StockAlertSerializer(alert).data,
-            'message': 'تم إرسال طلب الاستعجال وتصعيد الأولوية إلى: ' + new_priority,
         })
 
     @action(detail=True, methods=['post'])

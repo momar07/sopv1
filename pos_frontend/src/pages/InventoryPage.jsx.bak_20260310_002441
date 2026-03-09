@@ -93,54 +93,23 @@ function SummaryPanel() {
   const [showAlertModal, setShowAlertModal] = useState(false);
   const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
 
-  const [alerts, setAlerts] = useState([]);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, lp, al] = await Promise.all([
+      const [s, lp] = await Promise.all([
         inventoryAPI.getAlertsSummary({ threshold:10 }),
         productsAPI.getLowStock(),
-        inventoryAPI.getAlerts({ is_resolved: false, page_size: 200 }),
       ]);
       setSummary(s.data);
       setLow(lp.data?.results || lp.data || []);
-      setAlerts(al.data?.results || al.data || []);
     } catch { /**/ } finally { setLoading(false); }
   }, []);
 
-  // بناء map: product_id → alert
-  const alertByProduct = React.useMemo(() => {
-    const map = {};
-    alerts.forEach(a => {
-      // تنبيه فردي
-      if (a.product) map[a.product] = a;
-      // تنبيه مجمع — alert_items
-      (a.alert_items || []).forEach(it => {
-        if (it.product) map[it.product] = a;
-      });
-    });
-    return map;
-  }, [alerts]);
-
   const handleSendAlert = async (product) => {
     try {
-      await inventoryAPI.checkAndGenerateAlerts({
-        threshold:   product.min_stock || 10,
-        product_ids: [product.id],
-        bulk_mode:   false,
-      });
+      await inventoryAPI.checkAndGenerateAlerts({ threshold: product.min_stock || 10 });
       notify(`✅ تم إرسال تنبيه للمنتج "${product.name}" — راجع قسم المشتريات`);
-      load();
     } catch { notify('خطأ في إرسال التنبيه','error'); }
-  };
-
-  const handleUrgency = async (alert) => {
-    try {
-      await inventoryAPI.addUrgencyNote(alert.id);
-      notify('🚨 تم إرسال طلب الاستعجال وتصعيد الأولوية');
-      load();
-    } catch { notify('خطأ في إرسال الاستعجال','error'); }
   };
 
   useEffect(()=>{ load(); }, [load]);
@@ -203,8 +172,7 @@ function SummaryPanel() {
                 <th className="px-4 py-3 font-bold">الباركود</th>
                 <th className="px-4 py-3 font-bold">المخزون</th>
                 <th className="px-4 py-3 font-bold">سعر البيع</th>
-                <th className="px-4 py-3 font-bold text-center">حالة التنبيه</th>
-                <th className="px-4 py-3 font-bold text-center">اجراء</th>
+                <th className="px-4 py-3 font-bold">اجراء</th>
               </tr>
             </thead>
             <tbody>
@@ -216,45 +184,11 @@ function SummaryPanel() {
                     <span className={`font-black ${p.stock===0?'text-red-600':'text-yellow-600'}`}>{p.stock}</span>
                   </td>
                   <td className="px-4 py-3">{fmt(p.price)} ج</td>
-                  <td className="px-4 py-3 text-center">
-                    {alertByProduct[p.id] ? (
-                      <span className={`text-xs font-bold px-2 py-1 rounded-full ${
-                        alertByProduct[p.id].ticket_status === 'resolved' ? 'bg-green-100 text-green-700' :
-                        alertByProduct[p.id].ticket_status === 'ordered'  ? 'bg-blue-100 text-blue-700'  :
-                        alertByProduct[p.id].ticket_status === 'in_progress' ? 'bg-purple-100 text-purple-700' :
-                        'bg-orange-100 text-orange-700'
-                      }`}>
-                        {alertByProduct[p.id].ticket_status === 'resolved'    ? '✅ تم الحل'      :
-                         alertByProduct[p.id].ticket_status === 'ordered'     ? '📦 تم الإرسال'  :
-                         alertByProduct[p.id].ticket_status === 'in_progress' ? '🔄 قيد التنفيذ' :
-                         '🔔 مفتوح'}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-gray-400">لم يُرسل</span>
-                    )}
-                  </td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-1 justify-center">
-                      <button
-                        onClick={() => !alertByProduct[p.id] && handleSendAlert(p)}
-                        disabled={!!alertByProduct[p.id]}
-                        title={alertByProduct[p.id] ? 'تم إرسال تنبيه بالفعل' : 'إرسال تنبيه للمشتريات'}
-                        className={`text-xs font-bold px-3 py-1.5 rounded-lg transition ${
-                          alertByProduct[p.id]
-                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                            : 'bg-yellow-500 hover:bg-yellow-600 text-white cursor-pointer'
-                        }`}>
-                        🔔 إرسال تنبيه
-                      </button>
-                      {alertByProduct[p.id] && !alertByProduct[p.id].is_resolved && (
-                        <button
-                          onClick={() => handleUrgency(alertByProduct[p.id])}
-                          title="إرسال طلب استعجال للمشتريات"
-                          className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-2 py-1.5 rounded-lg transition">
-                          🚨 استعجال
-                        </button>
-                      )}
-                    </div>
+                    <button onClick={() => handleSendAlert(p)}
+                      className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+                      🔔 إرسال تنبيه
+                    </button>
                   </td>
                 </tr>
               ))}

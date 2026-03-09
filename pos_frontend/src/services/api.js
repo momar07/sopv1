@@ -191,6 +191,7 @@ export const inventoryAPI = {
   getAlert:              (id)           => api.get(`/inventory/alerts/${id}/`),
   getAlertsSummary:      (params)       => api.get('/inventory/alerts/summary/', { params }),
   checkAndGenerateAlerts:(data)         => api.post('/inventory/alerts/check_and_generate/', data),
+  addUrgencyNote:         (id) => api.post(`/inventory/alerts/${id}/add_urgency_note/`),
   resolveAlert:          (id, data={}) => api.post(`/inventory/alerts/${id}/resolve/`, data),
   addAlertNote:          (id, data)     => api.post(`/inventory/alerts/${id}/add_note/`, data),
   createPoFromAlert:     (id, data)     => api.post(`/inventory/alerts/${id}/create_purchase_order/`, data),
