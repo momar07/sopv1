@@ -57,10 +57,8 @@ export default function InventoryPage() {
   const [tab, setTab] = useState('summary');
   const tabs = [
     { key:'summary',   label:'📊 ملخص المخزون' },
-    { key:'orders',    label:'📦 أوامر الشراء'  },
     { key:'adjust',    label:'⚖️ تسوية المخزون' },
     { key:'movements', label:'🔄 حركة المخزون'  },
-    { key:'alerts',    label:'🔔 التنبيهات'     },
     { key:'suppliers', label:'🏭 الموردون'       },
   ];
   return (
@@ -78,10 +76,8 @@ export default function InventoryPage() {
         ))}
       </div>
       {tab==='summary'   && <SummaryPanel />}
-      {tab==='orders'    && <PurchaseOrdersPanel />}
       {tab==='adjust'    && <AdjustPanel />}
       {tab==='movements' && <MovementsPanel />}
-      {tab==='alerts'    && <AlertsPanel />}
       {tab==='suppliers' && <SuppliersPanel />}
     </div>
   );
@@ -92,31 +88,34 @@ function SummaryPanel() {
   const [summary, setSummary]         = useState(null);
   const [lowProducts, setLow]         = useState([]);
   const [loading, setLoading]         = useState(true);
-  const [quickOrderProduct, setQuick] = useState(null);
-  const [suppliers, setSuppliers]     = useState([]);
-  const [toast, setToast]             = useState(null);
+  const [toast, setToast] = useState(null);
   const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, lp, sup] = await Promise.all([
+      const [s, lp] = await Promise.all([
         inventoryAPI.getAlertsSummary({ threshold:10 }),
         productsAPI.getLowStock(),
-        inventoryAPI.getSuppliers(),
       ]);
       setSummary(s.data);
       setLow(lp.data?.results || lp.data || []);
-      setSuppliers(sup.data?.results || sup.data || []);
     } catch { /**/ } finally { setLoading(false); }
   }, []);
+
+  const handleSendAlert = async (product) => {
+    try {
+      await inventoryAPI.checkAndGenerateAlerts({ threshold: product.min_stock || 10 });
+      notify(`✅ تم إرسال تنبيه للمنتج "${product.name}" — راجع قسم المشتريات`);
+    } catch { notify('خطأ في إرسال التنبيه','error'); }
+  };
 
   useEffect(()=>{ load(); }, [load]);
 
   const handleGenerate = async () => {
     try {
       const r = await inventoryAPI.checkAndGenerateAlerts({ threshold:10 });
-      notify(`تم انشاء ${r.data.created_alerts} تنبيه جديد`);
+      notify(`تم إنشاء ${r.data.created_alerts} تنبيه جديد — اذهب لقسم المشتريات لمعالجتها`);
       load();
     } catch { notify('خطأ في توليد التنبيهات','error'); }
   };
@@ -151,7 +150,7 @@ function SummaryPanel() {
       </div>
       <button onClick={handleGenerate}
         className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition">
-        🔄 فحص وتحديث التنبيهات
+        🔔 فحص وإرسال تنبيهات المخزون
       </button>
       {lowProducts.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -178,9 +177,9 @@ function SummaryPanel() {
                   </td>
                   <td className="px-4 py-3">{fmt(p.price)} ج</td>
                   <td className="px-4 py-3">
-                    <button onClick={() => setQuick(p)}
-                      className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
-                      📦 طلب شراء
+                    <button onClick={() => handleSendAlert(p)}
+                      className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+                      🔔 إرسال تنبيه
                     </button>
                   </td>
                 </tr>
@@ -189,15 +188,7 @@ function SummaryPanel() {
           </table>
         </div>
       )}
-      {quickOrderProduct && (
-        <QuickOrderModal
-          product={quickOrderProduct}
-          suppliers={suppliers}
-          onClose={() => setQuick(null)}
-          onSaved={() => { setQuick(null); notify('تم انشاء طلب الشراء بنجاح'); }}
-          onError={(msg) => notify('خطأ: ' + msg, 'error')}
-        />
-      )}
+
     </div>
   );
 }
