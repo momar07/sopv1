@@ -1,3 +1,15 @@
+
+## Fix-12 — Bulk Alert (Grouped Multi-Product Alert) [20260309]
+### Added
+- `StockAlertItem` model: links multiple products to a single alert
+- `check_and_generate` view: new `bulk_mode=true` creates one grouped alert
+- `create_bulk_purchase_order` action: supports `mode=single` (one PO) or `mode=per_item` (PO per product)
+- `BulkPOSection` React component in AlertTicketModal
+- `CreateAlertsModal` now sends bulk request instead of N individual requests
+### Migration
+- `python manage.py makemigrations inventory --name fix12_alert_items`
+- `python manage.py migrate inventory`
+
 # CHANGELOG
 
 ## [2026-03-09] — Fix-07: Purchasing Module — Full Overhaul

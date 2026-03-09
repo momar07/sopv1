@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
-from .models import Supplier, PurchaseOrder, PurchaseOrderItem, StockAdjustment, StockAlert, StockAlertItem, StockAlertNote, StockMovement
+from .models import Supplier, PurchaseOrder, PurchaseOrderItem, StockAdjustment, StockAlert, StockAlertNote, StockMovement
 from products.models import Product
 
 
@@ -169,21 +169,6 @@ class LinkedPOSerializer(serializers.ModelSerializer):
                   'expected_date', 'received_at', 'supplier_name', 'user_name', 'created_at']
 
 
-
-class StockAlertItemSerializer(serializers.ModelSerializer):
-    product_name    = serializers.CharField(source='product.name',    read_only=True)
-    product_barcode = serializers.CharField(source='product.barcode', read_only=True)
-    alert_type_display = serializers.CharField(source='get_alert_type_display', read_only=True)
-
-    class Meta:
-        model  = StockAlertItem
-        fields = [
-            'id', 'product', 'product_name', 'product_barcode',
-            'alert_type', 'alert_type_display',
-            'current_stock', 'threshold', 'created_at',
-        ]
-        read_only_fields = ['created_at']
-
 class StockAlertSerializer(serializers.ModelSerializer):
     product_name          = serializers.CharField(source='product.name',               read_only=True)
     product_barcode       = serializers.CharField(source='product.barcode',             read_only=True)
@@ -197,8 +182,6 @@ class StockAlertSerializer(serializers.ModelSerializer):
     # Fix-2: قائمة POs مرتبطة بدل واحدة
     linked_pos_data       = LinkedPOSerializer(source='linked_pos', many=True,          read_only=True)
     linked_pos_count      = serializers.SerializerMethodField()
-    alert_items           = StockAlertItemSerializer(many=True, read_only=True)
-    alert_items_count     = serializers.SerializerMethodField()
     notes                 = StockAlertNoteSerializer(many=True, read_only=True)
     notes_count           = serializers.SerializerMethodField()
 
@@ -215,7 +198,6 @@ class StockAlertSerializer(serializers.ModelSerializer):
             'deadline',
             'linked_pos_data', 'linked_pos_count',
             'is_resolved', 'resolved_at',
-            'alert_items', 'alert_items_count',
             'notes', 'notes_count',
             'created_at', 'updated_at',
         ]
@@ -223,9 +205,6 @@ class StockAlertSerializer(serializers.ModelSerializer):
 
     def get_notes_count(self, obj):
         return obj.notes.count()
-
-    def get_alert_items_count(self, obj):
-        return obj.alert_items.count()
 
     def get_linked_po_reference(self, obj):
         first = obj.linked_pos.order_by('-created_at').first()

@@ -172,6 +172,10 @@ class StockAlert(models.Model):
         related_name='linked_alerts',
         verbose_name='اوامر الشراء المرتبطة'
     )
+    created_by    = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='created_alerts'
+    )
     is_resolved   = models.BooleanField(default=False)
     resolved_at   = models.DateTimeField(null=True, blank=True)
     created_at    = models.DateTimeField(auto_now_add=True)
@@ -200,36 +204,6 @@ class StockAlert(models.Model):
             return True
         return False
 
-
-
-class StockAlertItem(models.Model):
-    """بند في تنبيه مجمع — منتج واحد من ضمن مجموعة"""
-    id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    alert         = models.ForeignKey(
-        StockAlert, on_delete=models.CASCADE,
-        related_name='alert_items',
-        verbose_name='التنبيه'
-    )
-    product       = models.ForeignKey(
-        'products.Product', on_delete=models.CASCADE,
-        verbose_name='المنتج'
-    )
-    current_stock = models.IntegerField(default=0, verbose_name='المخزون وقت الانشاء')
-    threshold     = models.IntegerField(default=0, verbose_name='الحد الادنى')
-    alert_type    = models.CharField(
-        max_length=20,
-        choices=[('low','مخزون منخفض'),('out','نفاد المخزون')],
-        default='low'
-    )
-    created_at    = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        verbose_name        = 'بند تنبيه'
-        verbose_name_plural = 'بنود التنبيهات'
-        unique_together     = [['alert', 'product']]
-
-    def __str__(self):
-        return self.product.name + ' — ' + self.alert_type
 
 class StockAlertNote(models.Model):
     NOTE_TYPES = [

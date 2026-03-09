@@ -155,6 +155,10 @@ function SummaryPanel() {
           className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition">
           إنشاء تنبيهات للمشتريات
         </button>
+                    <button onClick={() => setShowAlertModal(true)}
+              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded text-sm">
+              إنشاء تنبيه جديد
+            </button>
             <button onClick={handleGenerate}
               className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded text-sm">
               {loading ? <Spinner/> : 'توليد تنبيهات'}
@@ -235,18 +239,23 @@ function CreateAlertsModal({ products, onClose, onCreated, notify }) {
   const handleCreate = async () => {
     if (!selectedProducts.length) return notify('اختر صنف واحد على الأقل', 'error');
     setSaving(true);
+    let created = 0;
     try {
-      // Fix-12: انشاء تنبيه مجمع واحد بدل تنبيه لكل منتج
-      const res = await inventoryAPI.checkAndGenerateAlerts({
-        threshold:   10,
-        priority:    priority,
-        product_ids: selectedProducts.map(p => p.id),
-        bulk_mode:   true,
-      });
-      const cnt = res.data.items_count || selectedProducts.length;
-      notify('تم إنشاء تنبيه مجمع يحتوي على ' + cnt + ' صنف — راجع قسم المشتريات');
+      for (const p of selectedProducts) {
+        try {
+          await inventoryAPI.createAlert({
+            product: p.id,
+            alert_type: p.stock === 0 ? 'out' : 'low',
+            priority: priority,
+            threshold: p.min_stock || 10,
+            current_stock: p.stock,
+          });
+          created++;
+        } catch { /**/ }
+      }
+      notify('تم إنشاء ' + created + ' تنبيه');
       onCreated();
-    } catch(e) { notify('خطأ: ' + (e?.response?.data?.error || 'خطأ في الإنشاء'), 'error'); }
+    } catch { notify('خطأ في الإنشاء', 'error'); }
     finally { setSaving(false); }
   };
 
@@ -335,7 +344,7 @@ function CreateAlertsModal({ products, onClose, onCreated, notify }) {
               className="px-4 py-2 rounded-xl border font-bold text-sm">إلغاء</button>
             <button onClick={handleCreate} disabled={saving || !selectedProducts.length}
               className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-2 rounded-xl text-sm disabled:opacity-50">
-              {saving ? '...' : 'إنشاء تنبيه مجمع (' + selectedProducts.length + ' صنف)'}
+              {saving ? '...' : 'إنشاء ' + selectedProducts.length + ' تنبيه'}
             </button>
           </div>
         </div>

@@ -198,7 +198,6 @@ export const inventoryAPI = {
   assignAlertToMe:       (id)           => api.post(`/inventory/alerts/${id}/assign_to_me/`),
   assignAlertToUser:     (id, data)     => api.post(`/inventory/alerts/${id}/assign_to_user/`, data),
   unassignAlert:         (id)           => api.post(`/inventory/alerts/${id}/unassign/`),
-  createBulkPOFromAlert: (id, data)     => api.post(`/inventory/alerts/${id}/create_bulk_purchase_order/`, data),
 
   // Stock Movements
   getMovements:          (params) => api.get('/inventory/movements/', { params }),

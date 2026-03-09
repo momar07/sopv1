@@ -8,7 +8,7 @@ from django.db import transaction
 from django.db.models import F
 from .models import (
     Supplier, PurchaseOrder, PurchaseOrderItem,
-    StockAdjustment, StockAlert, StockAlertItem, StockAlertNote, StockMovement,
+    StockAdjustment, StockAlert, StockAlertNote, StockMovement,
 )
 from .serializers import (
     SupplierSerializer, PurchaseOrderSerializer,
@@ -189,78 +189,24 @@ class StockAlertViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def check_and_generate(self, request):
-        """Fix-12: bulk alert — تنبيه مجمع لعدة منتجات دفعة واحدة"""
-        threshold     = int(request.data.get('threshold', 10))
-        priority      = request.data.get('priority', 'high')
-        product_ids   = request.data.get('product_ids', None)  # None = كل المنتجات
-        bulk_mode     = request.data.get('bulk_mode', False)
-
-        if product_ids is not None:
-            products = Product.objects.filter(is_active=True, id__in=product_ids)
-        else:
-            products = Product.objects.filter(is_active=True)
-
-        if bulk_mode and product_ids:
-            # انشاء تنبيه مجمع واحد لكل المنتجات المختارة
-            low_products = [
-                p for p in products
-                if p.stock == 0 or p.stock <= threshold
-            ]
-            if not low_products:
-                return Response({'created_alerts': 0, 'checked_products': products.count(),
-                                 'message': 'لا توجد منتجات منخفضة'})
-
-            with transaction.atomic():
-                # انشاء تنبيه واحد بدون product (مجمع) — نستخدم اول منتج كمرجع
-                bulk_alert = StockAlert.objects.create(
-                    product       = low_products[0],  # مرجع رئيسي
-                    alert_type    = 'out' if low_products[0].stock == 0 else 'low',
-                    priority      = priority,
-                    threshold     = threshold,
-                    current_stock = low_products[0].stock,
-                    created_by    = request.user,
-                )
-                # انشاء بند لكل منتج
-                for p in low_products:
-                    StockAlertItem.objects.create(
-                        alert         = bulk_alert,
-                        product       = p,
-                        current_stock = p.stock,
-                        threshold     = threshold,
-                        alert_type    = 'out' if p.stock == 0 else 'low',
-                    )
-            return Response({
-                'created_alerts':   1,
-                'bulk_alert_id':    str(bulk_alert.id),
-                'items_count':      len(low_products),
-                'checked_products': products.count(),
-            })
-
-        # الوضع العادي — تنبيه لكل منتج
-        created = 0
+        threshold = int(request.data.get('threshold', 10))
+        products  = Product.objects.filter(is_active=True)
+        created   = 0
         for product in products:
             if StockAlert.objects.filter(product=product, is_resolved=False).exists():
                 continue
             if product.stock == 0:
-                alert = StockAlert.objects.create(
+                StockAlert.objects.create(
                     product=product, alert_type='out', priority='critical',
                     threshold=threshold, current_stock=0,
                     created_by=request.user,
                 )
-                StockAlertItem.objects.create(
-                    alert=alert, product=product,
-                    current_stock=0, threshold=threshold, alert_type='out',
-                )
                 created += 1
             elif product.stock <= threshold:
-                alert = StockAlert.objects.create(
+                StockAlert.objects.create(
                     product=product, alert_type='low', priority='high',
                     threshold=threshold, current_stock=product.stock,
                     created_by=request.user,
-                )
-                StockAlertItem.objects.create(
-                    alert=alert, product=product,
-                    current_stock=product.stock, threshold=threshold, alert_type='low',
                 )
                 created += 1
         return Response({'created_alerts': created, 'checked_products': products.count()})
@@ -351,93 +297,6 @@ class StockAlertViewSet(viewsets.ModelViewSet):
                 'status':           po.status,
                 'total_cost':       str(po.total_cost),
             },
-        })
-
-
-    @action(detail=True, methods=['post'])
-    def create_bulk_purchase_order(self, request, pk=None):
-        """Fix-12: انشاء PO مجمع لكل بنود التنبيه او PO لكل بند"""
-        alert    = self.get_object()
-        mode     = request.data.get('mode', 'single')   # single | per_item
-        supplier_id   = request.data.get('supplier') or None
-        expected_date = request.data.get('expected_date') or None
-        po_notes      = request.data.get('notes', '')
-        items_data    = request.data.get('items', [])  # [{product, quantity, unit_cost}]
-
-        alert_items = alert.alert_items.select_related('product').all()
-        if not alert_items.exists():
-            return Response({'error': 'لا توجد بنود في هذا التنبيه'}, status=400)
-
-        created_pos = []
-
-        with transaction.atomic():
-            if mode == 'single':
-                # PO واحد لكل البنود
-                import time
-                ref = 'PO-BULK-' + str(alert.id)[:8].upper() + '-' + str(int(time.time()))[-4:]
-                po  = PurchaseOrder.objects.create(
-                    reference_number = ref,
-                    supplier_id      = supplier_id,
-                    user             = request.user,
-                    status           = 'ordered',
-                    expected_date    = expected_date,
-                    notes            = po_notes or 'امر شراء مجمع من تنبيه',
-                )
-                for item_d in items_data:
-                    product_id = item_d.get('product')
-                    qty        = int(item_d.get('quantity', 1))
-                    cost       = item_d.get('unit_cost', 0)
-                    PurchaseOrderItem.objects.create(
-                        order=po, product_id=product_id,
-                        quantity=qty, unit_cost=cost,
-                    )
-                po.recalculate_total()
-                alert.linked_pos.add(po)
-                created_pos.append(po)
-
-            elif mode == 'per_item':
-                # PO منفصل لكل بند
-                import time
-                for item_d in items_data:
-                    product_id = item_d.get('product')
-                    qty        = int(item_d.get('quantity', 1))
-                    cost       = item_d.get('unit_cost', 0)
-                    ref = 'PO-' + str(product_id)[:8].upper() + '-' + str(int(time.time()))[-4:]
-                    po  = PurchaseOrder.objects.create(
-                        reference_number = ref,
-                        supplier_id      = supplier_id,
-                        user             = request.user,
-                        status           = 'ordered',
-                        expected_date    = expected_date,
-                        notes            = po_notes,
-                    )
-                    PurchaseOrderItem.objects.create(
-                        order=po, product_id=product_id,
-                        quantity=qty, unit_cost=cost,
-                    )
-                    po.recalculate_total()
-                    alert.linked_pos.add(po)
-                    created_pos.append(po)
-            else:
-                return Response({'error': 'mode يجب ان يكون single او per_item'}, status=400)
-
-            # تحديث حالة التنبيه
-            if alert.ticket_status not in ('ordered', 'resolved'):
-                alert.ticket_status = 'ordered'
-                alert.save(update_fields=['ticket_status'])
-
-            StockAlertNote.objects.create(
-                alert=alert, user=request.user, note_type='action',
-                text='تم انشاء ' + str(len(created_pos)) + ' امر شراء — الوضع: ' + mode,
-            )
-
-        return Response({
-            'alert':            StockAlertSerializer(alert).data,
-            'created_pos_count': len(created_pos),
-            'purchase_orders':  [
-                {'id': str(p.id), 'reference_number': p.reference_number, 'total_cost': str(p.total_cost)}
-                for p in created_pos
-            ],
         })
 
     @action(detail=True, methods=['post'])
