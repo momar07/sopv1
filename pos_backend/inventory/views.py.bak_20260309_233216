@@ -487,7 +487,6 @@ class StockAlertViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def assign_to_user(self, request, pk=None):
-        alert = self.get_object()
         from django.contrib.auth import get_user_model
         User = get_user_model()
         user_id = request.data.get('user_id')
