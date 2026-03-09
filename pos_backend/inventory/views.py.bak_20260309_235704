@@ -403,8 +403,8 @@ class StockAlertViewSet(viewsets.ModelViewSet):
                     product_id = item_d.get('product')
                     qty        = int(item_d.get('quantity', 1))
                     cost       = item_d.get('unit_cost', 0)
-                    # مورد خاص بالصنف أو الافتراضي
-                    item_supplier = item_d.get('supplier_id') or supplier_id
+                # مورد خاص بالصنف أو الافتراضي
+                item_supplier = item_d.get('supplier_id') or supplier_id
                     ref = 'PO-' + str(product_id)[:8].upper() + '-' + base_ts[-4:] + str(idx)
                     po  = PurchaseOrder.objects.create(
                         reference_number = ref,

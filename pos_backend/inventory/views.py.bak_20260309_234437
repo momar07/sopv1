@@ -398,17 +398,14 @@ class StockAlertViewSet(viewsets.ModelViewSet):
             elif mode == 'per_item':
                 # PO منفصل لكل بند
                 import time
-                base_ts = str(int(time.time()))
-                for idx, item_d in enumerate(items_data):
+                for item_d in items_data:
                     product_id = item_d.get('product')
                     qty        = int(item_d.get('quantity', 1))
                     cost       = item_d.get('unit_cost', 0)
-                    # مورد خاص بالصنف أو الافتراضي
-                    item_supplier = item_d.get('supplier_id') or supplier_id
-                    ref = 'PO-' + str(product_id)[:8].upper() + '-' + base_ts[-4:] + str(idx)
+                    ref = 'PO-' + str(product_id)[:8].upper() + '-' + str(int(time.time()))[-4:]
                     po  = PurchaseOrder.objects.create(
                         reference_number = ref,
-                        supplier_id      = item_supplier,
+                        supplier_id      = supplier_id,
                         user             = request.user,
                         status           = 'ordered',
                         expected_date    = expected_date,
