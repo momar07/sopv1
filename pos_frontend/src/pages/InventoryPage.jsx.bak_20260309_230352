@@ -150,20 +150,10 @@ function SummaryPanel() {
           </div>
         ))}
       </div>
-      <div className="flex gap-2 flex-wrap">
-        <button onClick={() => setShowAlertModal(true)}
-          className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition">
-          إنشاء تنبيهات للمشتريات
-        </button>
-                    <button onClick={() => setShowAlertModal(true)}
-              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded text-sm">
-              إنشاء تنبيه جديد
-            </button>
-            <button onClick={handleGenerate}
-              className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded text-sm">
-              {loading ? <Spinner/> : 'توليد تنبيهات'}
-            </button>
-      </div>
+      <button onClick={handleGenerate}
+        className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition">
+        🔔 فحص وإرسال تنبيهات المخزون
+      </button>
       {lowProducts.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b bg-yellow-50">
@@ -598,6 +588,7 @@ function ReceiveModal({ order, onClose, onReceive }) {
     </Modal>
   );
 }
+
 
 // ══════════════════════════════════════════════════════
 //  ReceivePanel — استلامات المخزون
