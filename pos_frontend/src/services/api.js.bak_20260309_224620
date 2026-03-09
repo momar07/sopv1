@@ -186,7 +186,6 @@ export const inventoryAPI = {
   createAdjustment: (data)   => api.post('/inventory/adjustments/', data),
 
   // Alerts — Ticket System
-  createAlert:           (data)        => api.post('/inventory/alerts/', data),
   getAlerts:             (params)       => api.get('/inventory/alerts/', { params }),
   getAlert:              (id)           => api.get(`/inventory/alerts/${id}/`),
   getAlertsSummary:      (params)       => api.get('/inventory/alerts/summary/', { params }),

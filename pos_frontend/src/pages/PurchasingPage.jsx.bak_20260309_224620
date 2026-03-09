@@ -360,28 +360,6 @@ function AlertsPanel() {
     } catch { notify('خطأ في توليد التنبيهات', 'error'); }
   };
 
-  const handlePriorityChange = async (id, priority) => {
-    try {
-      await inventoryAPI.updateAlertMeta(id, { priority });
-      setAlerts(prev => prev.map(a => a.id === id ? { ...a, priority } : a));
-    } catch { notify('خطأ في تغيير الأولوية', 'error'); }
-  };
-
-  const handleAssignChange = async (id, userId) => {
-    try {
-      if (userId) {
-        await inventoryAPI.assignAlertToUser(id, { user_id: userId });
-      } else {
-        await inventoryAPI.unassignAlert(id);
-      }
-      setAlerts(prev => prev.map(a => {
-        if (a.id !== id) return a;
-        const u = users.find(u => u.id === userId);
-        return { ...a, assigned_to: userId || null, assigned_to_name: u?.username || null };
-      }));
-    } catch { notify('خطأ في التخصيص', 'error'); }
-  };
-
   const filters = [
     { key: 'unresolved', label: 'غير محلولة' },
     { key: 'out',        label: 'نفاد'     },
