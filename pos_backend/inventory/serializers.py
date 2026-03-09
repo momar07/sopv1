@@ -113,8 +113,9 @@ class StockAdjustmentSerializer(serializers.ModelSerializer):
         if after > ALERT_THRESHOLD:
             # حلّ كل alerts غير محلولة للمنتج ده
             StockAlert.objects.filter(product=product, is_resolved=False).update(
-                is_resolved = True,
-                resolved_at = timezone.now(),
+                is_resolved   = True,
+                ticket_status = 'resolved',
+                resolved_at   = timezone.now(),
             )
         elif after > 0 and after <= ALERT_THRESHOLD:
             # حلّ alert "نفاد" فقط لو الكمية رجعت، وأنشئ "low" لو مافيش
