@@ -5,5 +5,11 @@ class InventoryConfig(AppConfig):
     name = 'inventory'
     verbose_name = 'إدارة المخزون'
 
+
+
+class InventoryConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'inventory'
+
     def ready(self):
-        import inventory.signals  # signals.py موجود لكن فارغ (Fix-18)
+        import inventory.signals  # ← هذا السطر يُفعّل الـ Signals
