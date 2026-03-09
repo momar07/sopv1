@@ -196,6 +196,12 @@ class StockAlert(models.Model):
         self.resolved_at   = timezone.now()
         self.save(update_fields=['is_resolved', 'ticket_status', 'resolved_at'])
 
+    def check_and_auto_resolve(self):
+        """يحل التنبيه اوتوماتيك لو كل POs مرتبطة استُلمت"""
+        pos = self.linked_pos.all()
+        if pos.exists() and not pos.exclude(status='received').exists():
+            self.resolve()
+
     # Fix-4: يحل التنبيه تلقائياً لو كل الـ POs المرتبطة استُلمت
     def check_and_auto_resolve(self):
         pos = self.linked_pos.all()

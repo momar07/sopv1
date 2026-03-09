@@ -183,7 +183,6 @@ class StockAlertViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends    = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields   = ['alert_type', 'is_resolved', 'product', 'priority', 'ticket_status']
-    search_fields      = ['product__name']
     ordering           = ['-created_at']
     http_method_names  = ['get', 'post', 'patch', 'head', 'options']
 
@@ -301,17 +300,12 @@ class StockAlertViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def resolve(self, request, pk=None):
-        """Fix-4: يتحقق من كل الـ POs المرتبطة"""
         alert = self.get_object()
-        linked_pos = alert.linked_pos.all()
-        if linked_pos.exists():
-            unreceived = linked_pos.exclude(status='received')
-            if unreceived.exists():
-                refs = ', '.join(po.reference_number for po in unreceived)
-                return Response(
-                    {'error': 'اوامر الشراء التالية لم تُستلم بعد: ' + refs},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+        if alert.linked_po and alert.linked_po.status != 'received':
+            return Response(
+                {'error': 'أمر الشراء #' + alert.linked_po.reference_number + ' لم يُستلم بعد. استلم البضاعة أولاً.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         note_text = request.data.get('note', '')
         with transaction.atomic():
             alert.resolve(user=request.user)
@@ -333,54 +327,7 @@ class StockAlertViewSet(viewsets.ModelViewSet):
         alert.save()
         return Response(StockAlertSerializer(alert).data)
 
-    @action(detail=True, methods=['post'])
-    def assign_to_me(self, request, pk=None):
-        alert = self.get_object()
-        alert.assigned_to = request.user
-        alert.save(update_fields=['assigned_to'])
-        StockAlertNote.objects.create(
-            alert=alert, user=request.user, note_type='system',
-            text='تم تخصيص التذكرة لـ ' + request.user.username,
-        )
-        return Response(StockAlertSerializer(alert).data)
-
-    @action(detail=True, methods=['post'])
-    def assign_to_user(self, request, pk=None):
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-        user_id = request.data.get('user_id')
-        if not user_id:
-            return Response({'error': 'user_id مطلوب'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            target = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return Response({'error': 'المستخدم غير موجود'}, status=status.HTTP_400_BAD_REQUEST)
-        # فقط المدير يقدر يخصص لآخرين
-        allowed_groups = {'Admins', 'Managers'}
-        user_groups    = set(request.user.groups.values_list('name', flat=True))
-        if not request.user.is_superuser and not (allowed_groups & user_groups):
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('فقط المدير يمكنه تخصيص التذكرة لمستخدم آخر')
-        alert.assigned_to = target
-        alert.save(update_fields=['assigned_to'])
-        StockAlertNote.objects.create(
-            alert=alert, user=request.user, note_type='system',
-            text='تم تخصيص التذكرة لـ ' + target.username,
-        )
-        return Response(StockAlertSerializer(alert).data)
-
-    @action(detail=True, methods=['post'])
-    def unassign(self, request, pk=None):
-        alert = self.get_object()
-        alert.assigned_to = None
-        alert.save(update_fields=['assigned_to'])
-        StockAlertNote.objects.create(
-            alert=alert, user=request.user, note_type='system',
-            text='تم الغاء تخصيص التذكرة',
-        )
-        return Response(StockAlertSerializer(alert).data)
-
-# -- StockMovement (read-only) ──────────────────────────────
+# ── StockMovement (read-only) ──────────────────────────────
 class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):
     queryset           = StockMovement.objects.select_related('product', 'user', 'unit').all()
     serializer_class   = StockMovementSerializer

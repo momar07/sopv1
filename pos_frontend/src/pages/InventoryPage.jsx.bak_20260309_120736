@@ -60,6 +60,7 @@ export default function InventoryPage() {
     { key:'receive',   label:'📥 الاستلامات'    },
     { key:'adjust',    label:'⚖️ تسوية المخزون' },
     { key:'movements', label:'🔄 حركة المخزون'  },
+    { key:'suppliers', label:'🏭 الموردون'       },
   ];
   return (
     <div dir="rtl" className="p-4 min-h-screen bg-gray-50">
@@ -79,7 +80,7 @@ export default function InventoryPage() {
       {tab==='receive'   && <ReceivePanel />}
       {tab==='adjust'    && <AdjustPanel />}
       {tab==='movements' && <MovementsPanel />}
-      {/* Fix-5: الموردون انتقلوا لـ PurchasingPage */}
+      {tab==='suppliers' && <SuppliersPanel />}
     </div>
   );
 }

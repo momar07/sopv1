@@ -160,21 +160,10 @@ class StockAlert(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name='assigned_alerts'
     )
-    # Fix-7: اليوزر اللي انشا التنبيه
-    created_by    = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True,
-        on_delete=models.SET_NULL, related_name='created_alerts'
-    )
     deadline      = models.DateField(null=True, blank=True)
-    # Fix-2: ManyToMany بدل FK — لدعم اكتر من PO لكل تنبيه
-    linked_pos    = models.ManyToManyField(
-        PurchaseOrder, blank=True,
-        related_name='linked_alerts',
-        verbose_name='اوامر الشراء المرتبطة'
-    )
-    created_by    = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True,
-        on_delete=models.SET_NULL, related_name='created_alerts'
+    linked_po     = models.ForeignKey(
+        PurchaseOrder, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='linked_alerts'
     )
     is_resolved   = models.BooleanField(default=False)
     resolved_at   = models.DateTimeField(null=True, blank=True)
@@ -195,14 +184,6 @@ class StockAlert(models.Model):
         self.ticket_status = 'resolved'
         self.resolved_at   = timezone.now()
         self.save(update_fields=['is_resolved', 'ticket_status', 'resolved_at'])
-
-    # Fix-4: يحل التنبيه تلقائياً لو كل الـ POs المرتبطة استُلمت
-    def check_and_auto_resolve(self):
-        pos = self.linked_pos.all()
-        if pos.exists() and all(po.status == 'received' for po in pos):
-            self.resolve()
-            return True
-        return False
 
 
 class StockAlertNote(models.Model):

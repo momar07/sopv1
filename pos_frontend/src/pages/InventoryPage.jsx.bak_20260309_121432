@@ -60,6 +60,7 @@ export default function InventoryPage() {
     { key:'receive',   label:'📥 الاستلامات'    },
     { key:'adjust',    label:'⚖️ تسوية المخزون' },
     { key:'movements', label:'🔄 حركة المخزون'  },
+    { key:'suppliers', label:'🏭 الموردون'       },
   ];
   return (
     <div dir="rtl" className="p-4 min-h-screen bg-gray-50">

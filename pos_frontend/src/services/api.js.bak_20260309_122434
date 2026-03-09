@@ -194,9 +194,6 @@ export const inventoryAPI = {
   addAlertNote:          (id, data)     => api.post(`/inventory/alerts/${id}/add_note/`, data),
   createPoFromAlert:     (id, data)     => api.post(`/inventory/alerts/${id}/create_purchase_order/`, data),
   updateAlertMeta:       (id, data)     => api.patch(`/inventory/alerts/${id}/update_meta/`, data),
-  assignAlertToMe:       (id)           => api.post(`/inventory/alerts/${id}/assign_to_me/`),
-  assignAlertToUser:     (id, data)     => api.post(`/inventory/alerts/${id}/assign_to_user/`, data),
-  unassignAlert:         (id)           => api.post(`/inventory/alerts/${id}/unassign/`),
 
   // Stock Movements
   getMovements:          (params) => api.get('/inventory/movements/', { params }),
