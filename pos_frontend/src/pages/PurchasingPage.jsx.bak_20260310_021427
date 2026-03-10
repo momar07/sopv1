@@ -1309,6 +1309,93 @@ function BulkPOSection({ alert, suppliers, onDone }) {
   );
 }
 
+function PurchaseOrdersPanel() {
+  const [orders, setOrders]       = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [products, setProducts]   = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [showForm, setShowForm]   = useState(false);
+  const [toast, setToast]         = useState(null);
+  const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [o,s,p] = await Promise.all([
+        inventoryAPI.getPurchaseOrders(),
+        inventoryAPI.getSuppliers(),
+        productsAPI.getAll({ page_size:200 }),
+      ]);
+      setOrders(o.data?.results||o.data||[]);
+      setSuppliers(s.data?.results||s.data||[]);
+      setProducts(p.data?.results||p.data||[]);
+    } catch {/**/} finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleCancel = async (id) => {
+    if (!window.confirm('هل أنت متأكد من الإلغاء؟')) return;
+    try { await inventoryAPI.cancelPurchaseOrder(id); notify('تم الإلغاء'); load(); }
+    catch(e) { notify('خطأ: '+(e?.response?.data?.error||'خطأ'),'error'); }
+  };
+
+  if (loading) return <Spinner />;
+  return (
+    <div className="space-y-4">
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+      <div className="flex justify-between items-center">
+        <h2 className="font-black text-gray-700 text-lg">أوامر الشراء</h2>
+        <button onClick={() => setShowForm(true)}
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-sm">
+          إنشاء أمر شراء
+        </button>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <table className="w-full text-sm">
+          <thead><tr className="bg-gray-50 text-gray-500 text-right">
+            <th className="px-4 py-3 font-bold">رقم المرجع</th>
+            <th className="px-4 py-3 font-bold">المورد</th>
+            <th className="px-4 py-3 font-bold">الحالة</th>
+            <th className="px-4 py-3 font-bold">الإجمالي</th>
+            <th className="px-4 py-3 font-bold">التاريخ</th>
+            <th className="px-4 py-3 font-bold">إجراءات</th>
+          </tr></thead>
+          <tbody>
+            {orders.length===0 && (
+              <tr><td colSpan={6} className="text-center py-8 text-gray-400">لا توجد أوامر شراء</td></tr>
+            )}
+            {orders.map(o => (
+              <tr key={o.id} className="border-t hover:bg-gray-50">
+                <td className="px-4 py-3 font-bold text-blue-700">{o.reference_number}</td>
+                <td className="px-4 py-3">{o.supplier_name||'—'}</td>
+                <td className="px-4 py-3"><Badge label={o.status} color={statusColor(o.status)} /></td>
+                <td className="px-4 py-3 font-bold">{fmt(o.total_cost)}</td>
+                <td className="px-4 py-3 text-gray-500">{o.created_at?.split('T')[0]}</td>
+                <td className="px-4 py-3">
+                  {o.status!=='received'&&o.status!=='cancelled' && (
+                    <button onClick={() => handleCancel(o.id)}
+                      className="bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold px-3 py-1 rounded-lg">
+                      إلغاء
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {showForm && (
+        <NewOrderModal suppliers={suppliers} products={products}
+          onClose={() => setShowForm(false)}
+          onSaved={() => { setShowForm(false); load(); notify('تم إنشاء أمر الشراء'); }}
+          onError={(msg) => notify('خطأ: '+msg,'error')} />
+      )}
+    </div>
+  );
+}
+
+// ── NewOrderModal ──────────────────────────────────────────────
 function NewOrderModal({ suppliers, products, onClose, onSaved, onError }) {
   const [form, setForm] = useState({
     reference_number: 'PO-'+Date.now(),
