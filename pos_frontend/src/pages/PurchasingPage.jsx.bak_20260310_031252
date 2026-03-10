@@ -1107,9 +1107,7 @@ function PODetailsModal({ order, onClose, onReceive, onCancel, onEdit, notify })
 //   mode=single  → أمر واحد لكل الأصناف
 //   mode=per_item→ أمر منفصل لكل صنف بمورد مختلف
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function BulkPOSection({ alert, suppliers, onDone, onCreated, saving: savingProp, setSaving: setSavingProp, notify: notifyProp }) {
-  // onCreated = alias for onDone (Fix-23)
-  const _done = onCreated || onDone;
+function BulkPOSection({ alert, suppliers, onDone }) {
   const [mode, setMode]               = React.useState('per_item');
   const [globalSupplier, setGlobalSupplier] = React.useState('');
   const [expectedDate, setExpectedDate]     = React.useState('');
@@ -1174,7 +1172,7 @@ function BulkPOSection({ alert, suppliers, onDone, onCreated, saving: savingProp
           ? `✅ تم إنشاء أمر شراء واحد يضم ${items.length} صنف`
           : `✅ تم إنشاء ${createdCount} أمر شراء منفصل`,
       });
-      _done && _done('✅ تم إنشاء أوامر الشراء بنجاح');
+      onDone && onDone();
     } catch (e) {
       setMsg({ type: 'error', text: e?.response?.data?.detail || 'حدث خطأ' });
     } finally {

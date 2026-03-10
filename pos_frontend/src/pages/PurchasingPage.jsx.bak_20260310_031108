@@ -551,11 +551,7 @@ function AlertsPanel() {
           alert={selected}
           suppliers={suppliers}
           onClose={() => setSelected(null)}
-          onUpdated={(msg) => {
-            setSelected(null);
-            load();
-            if (msg) notify(msg);
-          }}
+          onUpdated={() => { setSelected(null); load(); }}
           notify={notify}
         />
       )}
@@ -565,7 +561,6 @@ function AlertsPanel() {
 
 // ── AlertTicketModal ───────────────────────────────────────────
 function AlertTicketModal({ alert, suppliers, onClose, onUpdated, notify }) {
-  // onUpdated(msg?) — يقفل المودال ويمرر رسالة للصفحة الرئيسية
   const [data, setData]     = useState(alert);
   const [noteForm, setNote] = useState({ note_type:'note', text:'', cost:'', expected_date:'', delay_reason:'', supplier_name:'' });
   const [poForm, setPo]     = useState({ supplier:'', quantity:1, unit_cost:'', expected_date:'', notes:'' });
@@ -590,7 +585,6 @@ function AlertTicketModal({ alert, suppliers, onClose, onUpdated, notify }) {
 
   const handleCreatePO = async () => {
     if (!poForm.quantity || !poForm.unit_cost) return notify('الكمية والتكلفة مطلوبان', 'error');
-    if (saving) return;   // منع الضغط المتكرر
     setSaving(true);
     try {
       await inventoryAPI.createPoFromAlert(data.id, {
@@ -600,8 +594,9 @@ function AlertTicketModal({ alert, suppliers, onClose, onUpdated, notify }) {
         expected_date: poForm.expected_date || null,
         notes: poForm.notes,
       });
-      // أغلق الـ Modal فوراً وأظهر Toast على الصفحة الرئيسية
-      onUpdated('✅ تم إنشاء أمر الشراء وربطه بالتنبيه');
+      notify('تم إنشاء عرض الشراء وربطه بالتنبيه');
+      await reload();
+      setPo({ supplier:'', quantity:1, unit_cost:'', expected_date:'', notes:'' });
     } catch(e) { notify('خطأ: '+(e?.response?.data?.error||JSON.stringify(e?.response?.data)||'خطأ'), 'error'); }
     finally { setSaving(false); }
   };
@@ -748,7 +743,7 @@ function AlertTicketModal({ alert, suppliers, onClose, onUpdated, notify }) {
           saving={saving}
           setSaving={setSaving}
           notify={notify}
-          onCreated={(msg) => { onUpdated(msg || '✅ تم إنشاء أوامر الشراء بنجاح'); }}
+          onCreated={async () => { await reload(); notify('تم إنشاء أمر الشراء وربطه بالتنبيه'); }}
         />
       )}
 
@@ -1107,9 +1102,7 @@ function PODetailsModal({ order, onClose, onReceive, onCancel, onEdit, notify })
 //   mode=single  → أمر واحد لكل الأصناف
 //   mode=per_item→ أمر منفصل لكل صنف بمورد مختلف
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function BulkPOSection({ alert, suppliers, onDone, onCreated, saving: savingProp, setSaving: setSavingProp, notify: notifyProp }) {
-  // onCreated = alias for onDone (Fix-23)
-  const _done = onCreated || onDone;
+function BulkPOSection({ alert, suppliers, onDone }) {
   const [mode, setMode]               = React.useState('per_item');
   const [globalSupplier, setGlobalSupplier] = React.useState('');
   const [expectedDate, setExpectedDate]     = React.useState('');
@@ -1174,7 +1167,7 @@ function BulkPOSection({ alert, suppliers, onDone, onCreated, saving: savingProp
           ? `✅ تم إنشاء أمر شراء واحد يضم ${items.length} صنف`
           : `✅ تم إنشاء ${createdCount} أمر شراء منفصل`,
       });
-      _done && _done('✅ تم إنشاء أوامر الشراء بنجاح');
+      onDone && onDone();
     } catch (e) {
       setMsg({ type: 'error', text: e?.response?.data?.detail || 'حدث خطأ' });
     } finally {
