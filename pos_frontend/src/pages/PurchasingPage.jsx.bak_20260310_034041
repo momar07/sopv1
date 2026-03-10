@@ -418,6 +418,10 @@ function AlertsPanel() {
     } catch { notify('خطأ في التخصيص', 'error'); }
   };
 
+  // ── pagination ──
+  const totalPages   = Math.ceil(alerts.length / PAGE_SIZE);
+  const pagedAlerts  = alerts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   // ── group by ticket_status ──
   const groups = [
     { key: 'open',        label: '🔴 مفتوحة',        color: 'text-red-700'    },
@@ -536,7 +540,7 @@ function AlertsPanel() {
       ) : (
         // ── عرض عادي مع pagination ──
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-50">
-          {alerts.map(a => (
+          {pagedAlerts.map(a => (
             <AlertCard
               key={a.id}
               alert={a}
