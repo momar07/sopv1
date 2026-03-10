@@ -474,38 +474,6 @@ class StockAlertViewSet(viewsets.ModelViewSet):
             'message': 'تم إرسال طلب الاستعجال وتصعيد الأولوية إلى: ' + new_priority,
         })
 
-
-    @action(detail=False, methods=['get'])
-    def poll(self, request):
-        """
-        Fix-25: Polling endpoint — يرجع عدد التنبيهات الجديدة منذ آخر وقت
-        GET /inventory/alerts/poll/?since=<timestamp>
-        """
-        since_ts = request.query_params.get('since')
-        try:
-            from django.utils.dateparse import parse_datetime
-            since_dt = parse_datetime(since_ts) if since_ts else None
-        except Exception:
-            since_dt = None
-
-        qs = StockAlert.objects.filter(is_resolved=False)
-        if since_dt:
-            new_alerts = qs.filter(created_at__gt=since_dt).count()
-        else:
-            new_alerts = qs.count()
-
-        # أعلى أولوية في التنبيهات الجديدة
-        priority_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
-        latest = qs.order_by('-created_at').first()
-        top_priority = latest.priority if latest else None
-
-        return Response({
-            'new_alerts':   new_alerts,
-            'total_unresolved': qs.count(),
-            'top_priority': top_priority,
-            'server_time':  timezone.now().isoformat(),
-        })
-
     @action(detail=True, methods=['post'])
     def resolve(self, request, pk=None):
         """Fix-4: يتحقق من كل الـ POs المرتبطة"""

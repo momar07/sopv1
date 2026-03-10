@@ -1,7 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { NotificationBell } from './NotificationBell';
 
 const Navbar = () => {
   const { user, logout } = useAuth();
@@ -47,11 +46,6 @@ const Navbar = () => {
           <div className="flex items-center space-x-4 space-x-reverse">
             {user && (
               <>
-                {/* Notification Bell */}
-                <NotificationBell
-                  onNavigateToAlerts={() => navigate('/purchasing')}
-                />
-
                 {/* User Info */}
                 <div className="flex items-center space-x-3 space-x-reverse border-l pl-4">
                   <div className="text-right">
