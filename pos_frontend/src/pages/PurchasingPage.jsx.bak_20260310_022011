@@ -780,9 +780,8 @@ function PurchaseOrdersPanel() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading]   = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [selected, setSelected]   = useState(null);   // للتفاصيل
-  const [editOrder, setEditOrder] = useState(null);   // للتعديل
-  const [toast, setToast]         = useState(null);
+  const [selected, setSelected] = useState(null);   // للتفاصيل
+  const [toast, setToast]       = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
 
@@ -905,11 +904,11 @@ function PurchaseOrdersPanel() {
                       className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-lg transition">
                       📋 تفاصيل
                     </button>
-                    {/* تعديل — للأوامر غير المستلمة وغير الملغية */}
-                    {o.status !== 'received' && o.status !== 'cancelled' && (
-                      <button onClick={() => setEditOrder(o)}
-                        className="bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold px-2.5 py-1 rounded-lg transition">
-                        ✏️ تعديل
+                    {/* استلام */}
+                    {(o.status === 'ordered' || o.status === 'draft') && (
+                      <button onClick={() => setSelected(o)}
+                        className="bg-green-50 hover:bg-green-100 text-green-700 text-xs font-bold px-2.5 py-1 rounded-lg transition">
+                        📥 استلام
                       </button>
                     )}
                     {/* إلغاء */}
@@ -947,19 +946,7 @@ function PurchaseOrdersPanel() {
           onClose={() => setSelected(null)}
           onReceive={handleReceive}
           onCancel={handleCancel}
-          onEdit={o => { setSelected(null); setEditOrder(o); }}
           notify={notify}
-        />
-      )}
-
-      {editOrder && (
-        <EditOrderModal
-          order={editOrder}
-          suppliers={suppliers}
-          products={products}
-          onClose={() => setEditOrder(null)}
-          onSaved={() => { setEditOrder(null); load(); notify('✅ تم تحديث أمر الشراء'); }}
-          onError={msg => notify('خطأ: ' + msg, 'error')}
         />
       )}
     </div>
@@ -967,7 +954,7 @@ function PurchaseOrdersPanel() {
 }
 
 // ── PODetailsModal — تفاصيل أمر الشراء ─────────────────────────
-function PODetailsModal({ order, onClose, onReceive, onCancel, onEdit, notify }) {
+function PODetailsModal({ order, onClose, onReceive, onCancel, notify }) {
   const [qtys, setQtys]     = useState({});
   const [tab, setTab]       = useState('details');
   const [receiving, setRec] = useState(false);
@@ -1029,8 +1016,9 @@ function PODetailsModal({ order, onClose, onReceive, onCancel, onEdit, notify })
         {/* Tabs */}
         <div className="flex border-b px-5">
           {[
-            { key:'details', label:'📋 البنود' },
-          ].map(t => (
+            { key:'details', label:'📋 البنود'  },
+            { key:'receive', label:'📥 استلام', hidden: order.status === 'received' || order.status === 'cancelled' },
+          ].filter(t => !t.hidden).map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`px-4 py-3 text-sm font-bold border-b-2 transition -mb-px ${
                 tab === t.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1067,25 +1055,47 @@ function PODetailsModal({ order, onClose, onReceive, onCancel, onEdit, notify })
             </table>
           )}
 
-
+          {tab === 'receive' && (
+            <div className="space-y-3">
+              <table className="w-full text-sm mb-3">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500 text-right text-xs">
+                    <th className="px-3 py-2 font-bold">المنتج</th>
+                    <th className="px-3 py-2 font-bold text-center">مطلوب</th>
+                    <th className="px-3 py-2 font-bold text-center">الكمية المستلمة</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(order.items || []).map(it => (
+                    <tr key={it.id} className="border-t">
+                      <td className="px-3 py-2 font-bold">{it.product_name}</td>
+                      <td className="px-3 py-2 text-center font-bold">{it.quantity}</td>
+                      <td className="px-3 py-2">
+                        <input type="number" min={0} max={it.quantity}
+                          value={qtys[it.id] ?? it.quantity}
+                          onChange={e => setQtys({ ...qtys, [it.id]: Number(e.target.value) })}
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1 text-center text-sm outline-none focus:border-blue-500" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button onClick={handleSubmit} disabled={receiving}
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl text-sm disabled:opacity-50">
+                {receiving ? '⏳ جاري الاستلام...' : '✅ تأكيد الاستلام'}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Footer actions */}
         <div className="border-t px-5 py-3 flex justify-between items-center">
-          <div className="flex gap-2">
-            {order.status !== 'received' && order.status !== 'cancelled' && (
-              <>
-                <button onClick={() => { onEdit && onEdit(order); onClose(); }}
-                  className="text-xs bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold px-3 py-1.5 rounded-lg transition">
-                  ✏️ تعديل الأمر
-                </button>
-                <button onClick={() => { onCancel(order.id); onClose(); }}
-                  className="text-xs bg-red-50 hover:bg-red-100 text-red-700 font-bold px-3 py-1.5 rounded-lg transition">
-                  ✕ إلغاء الأمر
-                </button>
-              </>
-            )}
-          </div>
+          {order.status !== 'received' && order.status !== 'cancelled' ? (
+            <button onClick={() => { onCancel(order.id); onClose(); }}
+              className="text-xs bg-red-50 hover:bg-red-100 text-red-700 font-bold px-3 py-1.5 rounded-lg transition">
+              إلغاء الأمر
+            </button>
+          ) : <div></div>}
           <button onClick={onClose}
             className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-4 py-1.5 rounded-lg transition">
             إغلاق
@@ -1512,142 +1522,3 @@ function SupplierFormModal({ initial, onClose, onSave }) {
     </Modal>
   );
 }
-
-// ── EditOrderModal — تعديل أمر شراء قائم ──────────────────────
-function EditOrderModal({ order, suppliers, products, onClose, onSaved, onError }) {
-  const INP2 = 'w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white transition';
-  const [form, setForm] = useState({
-    reference_number: order.reference_number || '',
-    supplier:         order.supplier         || '',
-    expected_date:    order.expected_date    || '',
-    notes:            order.notes            || '',
-    status:           order.status           || 'draft',
-  });
-  const [items, setItems] = useState(
-    (order.items || []).map(it => ({
-      id:        it.id,
-      product:   it.product,
-      quantity:  it.quantity,
-      unit_cost: it.unit_cost,
-    }))
-  );
-  const [saving, setSaving] = useState(false);
-
-  const addItem    = () => setItems([...items, { product:'', quantity:1, unit_cost:'' }]);
-  const removeItem = i  => setItems(items.filter((_, idx) => idx !== i));
-  const updateItem = (i, field, val) => {
-    const n = [...items]; n[i] = { ...n[i], [field]: val }; setItems(n);
-  };
-
-  const handleSave = async () => {
-    if (!form.reference_number) return onError('رقم المرجع مطلوب');
-    const valid = items.filter(it => it.product && it.quantity > 0 && it.unit_cost);
-    if (!valid.length) return onError('أضف منتجاً واحداً على الأقل');
-    setSaving(true);
-    try {
-      await inventoryAPI.updatePurchaseOrder(order.id, {
-        ...form,
-        supplier: form.supplier || null,
-        items: valid.map(it => ({
-          product:   it.product,
-          quantity:  Number(it.quantity),
-          unit_cost: Number(it.unit_cost),
-        })),
-      });
-      onSaved();
-    } catch(e) { onError(JSON.stringify(e?.response?.data || 'خطأ')); }
-    finally { setSaving(false); }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
-        onClick={e => e.stopPropagation()}>
-        <div className="flex justify-between items-center px-5 py-4 border-b">
-          <div>
-            <h3 className="font-black text-gray-800">✏️ تعديل أمر الشراء</h3>
-            <p className="text-xs text-gray-400 mt-0.5">{order.reference_number}</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 font-black text-xl">×</button>
-        </div>
-        <div className="p-5 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-gray-500 mb-1">رقم المرجع *</label>
-              <input className={INP2} value={form.reference_number}
-                onChange={e => setForm({ ...form, reference_number: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-500 mb-1">المورد</label>
-              <select className={INP2} value={form.supplier}
-                onChange={e => setForm({ ...form, supplier: e.target.value })}>
-                <option value="">بدون مورد</option>
-                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-500 mb-1">تاريخ الاستلام المتوقع</label>
-              <input type="date" className={INP2} value={form.expected_date}
-                onChange={e => setForm({ ...form, expected_date: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-500 mb-1">الحالة</label>
-              <select className={INP2} value={form.status}
-                onChange={e => setForm({ ...form, status: e.target.value })}>
-                <option value="draft">مسودة</option>
-                <option value="ordered">تم الطلب</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-500 mb-1">ملاحظات</label>
-            <textarea className={INP2} rows={2} value={form.notes}
-              onChange={e => setForm({ ...form, notes: e.target.value })} />
-          </div>
-
-          {/* المنتجات */}
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <span className="font-bold text-gray-700 text-sm">المنتجات</span>
-              <button onClick={addItem}
-                className="text-blue-600 text-xs font-bold hover:underline">+ إضافة منتج</button>
-            </div>
-            {items.map((item, i) => (
-              <div key={i} className="flex gap-2 mb-2 items-end">
-                <div className="flex-1">
-                  <select className={INP2 + ' text-xs'} value={item.product}
-                    onChange={e => updateItem(i, 'product', e.target.value)}>
-                    <option value="">اختر منتج</option>
-                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
-                <div className="w-20">
-                  <input type="number" className={INP2 + ' text-xs text-center'}
-                    placeholder="الكمية" min={1} value={item.quantity}
-                    onChange={e => updateItem(i, 'quantity', e.target.value)} />
-                </div>
-                <div className="w-24">
-                  <input type="number" className={INP2 + ' text-xs text-center'}
-                    placeholder="التكلفة" min={0} step="0.01" value={item.unit_cost}
-                    onChange={e => updateItem(i, 'unit_cost', e.target.value)} />
-                </div>
-                <button onClick={() => removeItem(i)}
-                  className="text-red-500 font-black text-xl leading-none mb-1">×</button>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex gap-3 justify-end pt-2">
-            <button onClick={onClose}
-              className="px-4 py-2 rounded-xl border font-bold text-sm text-gray-600">إلغاء</button>
-            <button onClick={handleSave} disabled={saving}
-              className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-2 rounded-xl text-sm disabled:opacity-50">
-              {saving ? '⏳ جاري الحفظ...' : '💾 حفظ التعديلات'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
