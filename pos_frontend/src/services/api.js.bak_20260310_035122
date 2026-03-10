@@ -18,9 +18,7 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
     // Cache-buster for GET requests (avoid stale responses)
-    // استثناء poll endpoint لأنه بيتضمن timestamp خاص به
-    const isPollRequest = config.url?.includes('/alerts/poll');
-    if ((config.method || '').toLowerCase() === 'get' && !isPollRequest) {
+    if ((config.method || '').toLowerCase() === 'get') {
       config.params = { ...(config.params || {}), _: Date.now() };
     }
     return config;

@@ -1,0 +1,65 @@
+/**
+ * Fix-25b: useAlertPolling — Smart Polling Hook (fixed infinite loop)
+ * يسأل السيرفر كل 30 ثانية عن تنبيهات جديدة
+ */
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { inventoryAPI } from '../services/api';
+
+const POLL_INTERVAL = 30000; // 30 ثانية
+
+export function useAlertPolling({ enabled = true, onNewAlert } = {}) {
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [topPriority, setTopPriority] = useState(null);
+  const [lastChecked, setLastChecked] = useState(null);
+
+  // نحتفظ بالـ refs عشان نتجنب إعادة إنشاء الـ interval
+  const lastServerTime  = useRef(null);
+  const onNewAlertRef   = useRef(onNewAlert);
+  const enabledRef      = useRef(enabled);
+
+  // تحديث الـ refs عند تغيير الـ props بدون إعادة إنشاء الـ interval
+  useEffect(() => { onNewAlertRef.current = onNewAlert; }, [onNewAlert]);
+  useEffect(() => { enabledRef.current = enabled; },     [enabled]);
+
+  const poll = useCallback(async () => {
+    if (!enabledRef.current) return;
+    try {
+      const since = lastServerTime.current;
+      const res   = await inventoryAPI.pollAlerts(since);
+      const { new_alerts, top_priority, server_time } = res.data;
+
+      // لو في تنبيهات جديدة منذ آخر poll
+      if (since && new_alerts > 0) {
+        setUnreadCount(prev => prev + new_alerts);
+        setTopPriority(top_priority);
+        if (onNewAlertRef.current) {
+          onNewAlertRef.current({ count: new_alerts, priority: top_priority });
+        }
+      } else if (!since) {
+        // أول poll — baseline فقط
+        setTopPriority(top_priority);
+      }
+
+      lastServerTime.current = server_time;
+      setLastChecked(new Date());
+    } catch(e) {
+      console.warn('Polling error:', e?.message);
+    }
+  }, []); // ← [] مقصودة — poll لا يتغير أبداً
+
+  // بدء الـ polling مرة واحدة فقط عند mount
+  useEffect(() => {
+    if (!enabled) return;
+
+    poll(); // أول استدعاء فوري
+
+    const id = setInterval(poll, POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, []); // ← [] مقصودة — interval لا يُعاد إنشاؤه
+
+  const clearUnread = useCallback(() => {
+    setUnreadCount(0);
+  }, []);
+
+  return { unreadCount, topPriority, lastChecked, clearUnread };
+}
